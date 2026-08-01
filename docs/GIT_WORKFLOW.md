@@ -24,10 +24,13 @@ Use the source target (or area) the change belongs to:
 - `protocol` — `Sources/CompanionProtocol`
 - `bridge` — `Sources/MacBridgeCore`
 - `appserver` — `Sources/CodexAppServer`
-- `spike` — `Sources/CodexMicroSpike`
-- `macapp` — the signed Mac app target (Phase 1 Step 5)
-- `ios` — the iOS app target (Phase 3)
-- `docs`, `ci`, `build` — non-source areas
+- `spike` — development-only feasibility or transport spikes
+- `crypto` — Phase 2 `CompanionCrypto` security primitives/state machines
+- `network` — Phase 2 `MacBridgeServer` listener/session transport
+- `security` — cross-cutting threat-model or secure-storage changes
+- `macapp` — the Mac menu-bar app/assembly target
+- `ios` — the iOS app or signed physical-device acceptance target
+- `docs`, `test`, `ci`, `build` — non-source areas
 
 ## 2. When to commit
 
@@ -106,7 +109,7 @@ Merge a PR only when **all** of these hold:
 1. `swift test` passes (all targets).
 2. `swift build -c release` passes.
 3. Swift format lint passes.
-4. Status docs affected by the change are updated in the PR.
+4. Status docs affected by the change are updated in the PR. When physical acceptance can only run on a squash-merged commit, immutable SHA-keyed evidence and the acceptance tag come first; a later docs-only PR may mirror that evidence without moving the tag.
 5. The PR has been reviewed — by the other collaborator when there is one, or as a deliberate self-review pass (read the full diff top to bottom) when working solo.
 6. The branch is up to date with `main` (rebase the branch, re-run tests, then merge).
 
@@ -127,7 +130,7 @@ Conflicts come from overlap and age. Prevent both:
 ## 7. Tags and milestones
 
 - Tag each phase acceptance on `main`: `phase-0-accepted`, `phase-1-accepted`, …
-- Tags are annotated (`git tag -a`) and their message cites the evidence snapshot (test counts, build results) recorded in the status doc.
+- Tags are annotated (`git tag -a`). Their message contains or links the immutable evidence snapshot keyed to the tested commit. When acceptance requires post-merge physical testing, a follow-up documentation-only PR may mirror that evidence into the status doc without moving the tag.
 - Semantic versioning (`v0.x.y`) starts when the first app target ships to TestFlight; until then, phase tags are the milestones.
 
 ## 8. Quick reference

@@ -32,4 +32,5 @@ The implementation does not yet expose a network listener, pair a phone, or incl
 See [the system architecture](docs/IOS_COMPANION_ARCHITECTURE.md) for the full design and phased delivery plan.
 Branching, commit, PR, and merge conventions are defined in [the Git workflow](docs/GIT_WORKFLOW.md).
 Current evidence and unresolved feasibility gates are tracked in [the Phase 0 status](docs/PHASE_0_STATUS.md).
-Current Mac bridge work is tracked in [the Phase 1 status](docs/PHASE_1_STATUS.md).
+Phase 1 Mac bridge evidence is tracked in [the Phase 1 status](docs/PHASE_1_STATUS.md).
+Approved Phase 2 work will follow [the secure pairing and networking execution plan](docs/PHASE_2_PLAN.md): P0 security contracts and observe-only networking first, then individually gated semantic commands.

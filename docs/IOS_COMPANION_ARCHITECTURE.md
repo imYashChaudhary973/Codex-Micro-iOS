@@ -1,6 +1,6 @@
 # Codex Micro for iPhone — System Architecture and Build Plan
 
-**Status:** Approved architecture; Phase 0 accepted; Phase 1 accepted
+**Status:** Approved architecture; Phase 0 accepted; Phase 1 accepted; Phase 2 approved and planned
 
 **Date:** 2026-07-31
 
@@ -728,6 +728,8 @@ Never record prompt text, response text, diffs, paths, command output, tokens, p
 - A phone cannot steer or start work above its granted mobile action ceiling, even when the underlying thread or Mac configuration is more permissive.
 
 ### Phase 2 — secure local pairing and networking
+
+**Execution plan:** [Phase 2 secure local pairing and networking plan](PHASE_2_PLAN.md). Security contracts, identity/crypto state machines, and an observe-only boundary precede any state-changing network path.
 
 **Build**
 
