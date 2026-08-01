@@ -4,7 +4,7 @@ Native iPhone companion work for Codex on a Mac. The Mac remains the authoritati
 
 ## Current implementation
 
-Phase 0 verified the installed Codex app-server and the intended IDE-hosted `vscode` session workflow. Phase 1 now includes shared native `CompanionProtocol` and `MacBridgeCore` libraries for semantic phone commands, strict validation, capability/project policy, mobile action profiles, bounded event replay, slot-status derivation, exact Codex compatibility checks, supervised runtime state, deterministic event routing, phone-safe state snapshots, digest-bound pending approvals, and an encrypted persistent command ledger.
+Phase 0 verified the installed Codex app-server and the intended IDE-hosted `vscode` session workflow. Phase 1 now includes shared native `CompanionProtocol` and `MacBridgeCore` libraries for semantic phone commands, strict validation, capability/project policy, mobile action profiles, bounded event replay, slot-status derivation, exact Codex compatibility checks, supervised runtime state, deterministic event routing, phone-safe state snapshots, digest-bound pending approvals, and an encrypted persistent command ledger. A deterministic fake app-server harness (`CodexTestSupport`) contract-tests every consumed notification and approval type, plus malformed and unknown messages, without live Codex turns.
 
 ```bash
 swift test
