@@ -1,12 +1,12 @@
 # Phase 2 — Secure Local Pairing and Networking Status
 
-**Status:** Step 2.1 complete — Step 2.2 (strict wire contracts) is next
+**Status:** Step 2.2 implemented (pending review/merge) — Step 2.3 (crypto contract + golden vectors) is next
 
 **Snapshot:** 2026-08-02
 
 ## Current objective
 
-Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. The next work is **Step 2.2 only**: strict wire contracts and the journal epoch in `CompanionProtocol`.
+Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. Step 2.2 then delivered the strict secure-session wire contracts and the journal-epoch replay cursor in `CompanionProtocol` as pure data types. The next work is **Step 2.3 only**: the `CompanionCrypto` target with canonical transcript encoding and golden crypto vectors.
 
 The accepted implementation order is defined in [the Phase 2 plan](PHASE_2_PLAN.md). This status document records evidence and limitations incrementally; it never treats source-only, loopback, generic-device, simulator, or Mac-only evidence as physical-iPhone proof.
 
@@ -69,25 +69,49 @@ Every gate that blocked Step 2.1 completion is resolved in the accepted ADR:
 
 **Unresolved listener-blocking questions: none.**
 
+## Step 2.2 outcome — strict wire contracts and journal epoch
+
+### Implemented scope (production `CompanionProtocol`, data-only)
+
+- Strict secure-session wire schemas: `SecurePairingRequest`/`SecurePairingResponse`, `SecureSessionAuthRequest`/`SecureSessionAuthResponse`, `SecureObservationSubscribe`/`SecureObservationAcknowledgement`, `SecureObservationDelivery` (opaque bounded payload), `SecureCommandResult`, and `SecureProblemNotice`/`SecureCloseNotice`. Every security/control decoder rejects unknown fields and wrong types and enforces explicit bounds on every string/data/collection field; validating initializers keep out-of-bounds values unrepresentable on the encode side as well.
+- Exact minor/feature negotiation: `SecureProtocolSelection` plus `SecureProtocolNegotiation` accept only the exact supported `(major, minor, feature set)` — no unconditional future-minor acceptance. Unknown, duplicate, and empty feature sets fail closed, and the closed `SecureProtocolFeature` vocabulary deliberately defines **no approval feature**.
+- Sealed replay-cursor envelope `ReplayCursorEnvelope` with exactly `(deviceID, grantRevision, authorizedViewEpoch, journalEpoch, sequence)`, `JournalEpoch` modeled as exactly 16 raw bytes, and `evaluate(against:)` semantics: matching current values may replay; older revision/view, foreign journal epoch, or retention-stale cursors force a filtered snapshot; mismatched device, ahead sequence, rollback (revision/view ahead of authority), counter overflow, or malformed values fail closed.
+- ADR §9 constants in the single `SecureTransportLimits` namespace (16 KiB frame, 64 KiB message, 8 fragments, header caps, deadlines, connection/rate/queue ceilings) plus the Step 2.2 wire-field bounds; every ADR value is asserted by test.
+- Closed, content-free `SecureProblemReason`/`SecureCloseReason`/`SecureCommandDenialReason` vocabularies — no free-form string payload exists on any wire diagnostic path.
+- The `ClientCommand` strict-decoding helper was extracted into a shared internal utility now used by every secure decoder; `ClientCommand` behavior is unchanged and its existing rejection tests still pass.
+
+### Step 2.2 verification
+
+- Golden JSON fixtures for every message type (14 fixtures) with byte-exact encode/decode/re-encode round trips against the canonical sorted-keys encoder.
+- 65 new deterministic tests covering unknown field/type, downgrade attempts (major/minor/pairing mode), unsupported feature/minor, duplicate/empty feature sets, malformed sizes (secret/nonce/public key/signature/journal epoch), empty/oversized/control-character strings, oversized payloads, denial-reason consistency, and full cursor semantics (mismatched device, stale revision/view, foreign epoch, retention, ahead/rollback/overflow, inverted retention window).
+
+### Honest limitations
+
+- **JSON schema only:** no cryptography, no canonical binary transcript encoding, and no sealed-frame carriage — the AEAD-sealed frames that transport these messages arrive with Steps 2.3/2.7. Nothing in Step 2.2 proves confidentiality, authenticity, or replay protection.
+- No listener, socket, Bonjour, pairing endpoint, Keychain, storage, executor, or policy logic was added. `SecureTransportLimits` values are named declarations for later enforcement (Steps 2.3/2.7), not enforced behavior.
+- The pairing pair covers the initial request/response schema only; SAS confirmation and the remaining pairing choreography are Step 2.5 scope and may add message types there.
+- `SecureObservationDelivery` carries an opaque bounded payload; binding filtered snapshot/event content schemas to it is Step 2.8 scope. The pre-existing `CompanionEnvelope`/`CompanionStateSnapshot` types remain non-strict application-data types outside the security/control surface.
+- Source-only evidence: no loopback, simulator, generic-device, or physical-device claims are made by this step.
+
 ## Current verification evidence
 
 ```text
-Root swift test: 80 passed, 0 failed (MacBridgeCoreTests 62, CodexAppServerTests 18)
+Root swift test: 145 passed, 0 failed (MacBridgeCoreTests 127, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
-Spike package (merged main, separate pins): 31 tests passed, 0 failed, 1 conditional row skipped in unsigned hosts
+Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run in Step 2.2
 Phase 2 production listener added: no
 Phase 2 production dependencies added: no
 Production pairing endpoint or Bonjour added: no
 Network command path added: no
 ```
 
-The four production negatives above are explicit: no production target gained a listener, dependency, Bonjour advertisement, pairing endpoint, or command path in Step 2.1. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
+The four production negatives above are explicit: no production target gained a listener, dependency, Bonjour advertisement, pairing endpoint, or command path in Steps 2.1–2.2. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
 
-## Deferred beyond Step 2.1
+## Deferred beyond Steps 2.1–2.2
 
-- Any production code or dependency implementing protocol, cryptography, identity storage, pairing, sessions, listener, WebSocket, Bonjour, grants, revocation, or command transport — these begin at Step 2.2 in plan order, adopting the ADR's exact pins at Steps 2.4a/2.7.
+- Any production code or dependency implementing cryptography, identity storage, pairing state machines, sessions, listener, WebSocket, Bonjour, grants, revocation, or command transport — these begin at Step 2.3 in plan order, adopting the ADR's exact pins at Steps 2.4a/2.7. Step 2.2 added only data-only strict wire schemas to `CompanionProtocol`.
 - The spike's deferred implementation gaps (rate limiting, slow-consumer policy, idle expiry, ping/pong deadlines, live `NWInterface` pinning, lifecycle-generation integration, `NWListener.service` physical re-verification, app-level connection caps, registry-based teardown) — owned by named steps in ADR §16.
 - Phone approval execution or approval assertion types — rejected throughout Phase 2; Phase 4 scope.
 - Physical-device claims — only at the post-provisional Phase 2 acceptance gate (Step 2.14).
