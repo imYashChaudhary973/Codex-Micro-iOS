@@ -66,13 +66,19 @@ The first distribution and platform assumptions are provisional: personal/TestFl
   - `0600` database permissions, backup exclusion, secure deletion, bounded ciphertext size, and schema-version checks,
   - startup converts all nonterminal records to durable `outcomeUnknown`,
   - terminal-record retention purge.
+- Deterministic fake app-server test harness (`CodexTestSupport` target):
+  - scripted JSON-RPC replies behind the `JSONLineTransport` seam with a fail-closed method-not-found default for unstubbed methods,
+  - sanitized fixtures for every consumed notification and all four approval kinds (command, network, file-change, permissions),
+  - adversarial malformed-line, methodless, unknown-notification, unknown-server-request, invalid-approval, and expired-approval shapes,
+  - crash, clean-close, and request-timeout simulation,
+  - contract tests that drive the real app-server client, domain store, and runtime supervisor through every scenario and assert that no server request is ever answered automatically.
 
 ## Verification
 
 ```text
-CompanionProtocol/MacBridgeCore tests: 32 passed, 0 failed
-CodexAppServer tests: 14 passed, 0 failed
-Total Swift tests: 46 passed, 0 failed
+CompanionProtocol/MacBridgeCore tests: 40 passed, 0 failed
+CodexAppServer tests: 18 passed, 0 failed
+Total Swift tests: 58 passed, 0 failed
 Generic iOS 17 arm64 CompanionProtocol build: passed
 macOS release build: passed
 Swift format lint: passed
@@ -107,7 +113,6 @@ Credentials or secrets stored: no
 - Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
 - Wire the Keychain-backed ledger factory to the signed Mac app's Application Support path.
 - Redacted structured logger with content-leak tests.
-- Fake app-server scenarios covering every consumed notification and approval type.
 - Automatic degraded-state restart/rebuild without replaying state-changing commands.
 - Simulator and physical-device integration once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
 

@@ -30,13 +30,17 @@ let package = Package(
       name: "CodexMicroSpike",
       dependencies: ["CodexAppServer", "MacBridgeCore"]
     ),
-    .testTarget(
-      name: "CodexAppServerTests",
+    .target(
+      name: "CodexTestSupport",
       dependencies: ["CodexAppServer"]
     ),
     .testTarget(
+      name: "CodexAppServerTests",
+      dependencies: ["CodexAppServer", "CodexTestSupport"]
+    ),
+    .testTarget(
       name: "MacBridgeCoreTests",
-      dependencies: ["CompanionProtocol", "MacBridgeCore"]
+      dependencies: ["CompanionProtocol", "MacBridgeCore", "CodexTestSupport"]
     ),
   ]
 )
