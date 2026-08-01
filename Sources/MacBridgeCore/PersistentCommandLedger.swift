@@ -181,6 +181,15 @@ public actor PersistentCommandLedger {
     records[commandID] = record
   }
 
+  public func markInFlightOutcomesUnknown(at date: Date = Date()) throws {
+    for commandID in Array(records.keys) {
+      guard var record = records[commandID], !record.state.isTerminal else { continue }
+      record.markOutcomeUnknown(at: date)
+      try storage.save(record)
+      records[commandID] = record
+    }
+  }
+
   public func markOutcomeUnknown(
     commandID: UUID,
     resultCode: CommandResultCode = .bridgeRestartedBeforeOutcome,

@@ -308,6 +308,10 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     continuation.finish()
   }
 
+  func readThread(threadID: String) async throws -> JSONValue {
+    throw CodexRuntimeRequestError.notReady
+  }
+
   func yield(_ event: AppServerEvent) {
     continuation.yield(event)
   }
