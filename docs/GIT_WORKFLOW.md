@@ -11,7 +11,7 @@
 | `main` | Always-green integration branch | Every commit builds, passes `swift test`, and passes format lint. No direct feature commits. |
 | `feat/<scope>-<short-name>` | One feature or plan step | Short-lived (days, not weeks). Branched from latest `main`. |
 | `fix/<scope>-<short-name>` | One bug fix | Same rules as feature branches. |
-| `docs/<short-name>` | Documentation-only change | May be merged with a fast review. |
+| `docs/<short-name>` | Documentation-only change | May be merged with a fast review — **except** threat models, security ADRs, and secure-storage decisions, which change security policy and require the full review of Sections 4–5 plus the security review pass defined by the active phase plan, regardless of being documentation-only. |
 
 Examples: `feat/bridge-fake-app-server`, `feat/bridge-approval-wiring`, `fix/protocol-envelope-decoding`, `docs/phase-1-status`.
 
@@ -93,7 +93,8 @@ Bad examples (do not write these): `wip`, `fixes`, `update code`, `changes as di
 
 ## 4. When to open a PR
 
-- **One PR per plan step or coherent feature.** The current Phase 1 close-out plan maps to one PR per step (fake app-server harness; approval wiring; degraded restart; redacted logger; Mac app shell + ledger path; exit-gate verification).
+- **One PR per plan step or coherent feature.** Each step of the currently active phase plan maps to exactly one PR (or one stacked series when the size ceiling forces a split), using the branch names the plan defines.
+- **Evidence-spike sequencing exception.** When a documentation step depends on checked-in executable evidence, the evidence-spike PRs branch from and squash-merge to `origin/main` **before** the docs step that cites them, in evidence-first order. The docs PR then references the merged spike SHAs. "Stacked" evidence PRs means this evidence-first merge order from `origin/main`, never branches taken off the docs branch, and the docs branch itself contains no executable or dependency code.
 - Open the PR when the branch builds, all tests pass, and the change is self-reviewed. Open a **draft PR** earlier if you want a visible checkpoint while still working.
 - Keep PRs reviewable: target under ~500 changed lines of non-generated code. If a step grows beyond that, split it into stacked PRs rather than one large one.
 - Every PR description contains:
