@@ -7,6 +7,10 @@ public enum CodexRuntimeFailure: Equatable, Sendable {
   case connectionClosed
 }
 
+public enum CodexRuntimeRequestError: Error, Equatable, Sendable {
+  case notReady
+}
+
 public enum CodexRuntimeState: Equatable, Sendable {
   case stopped
   case checkingCompatibility
@@ -21,6 +25,10 @@ public protocol CodexRuntimeSession: Sendable {
 
   func start() async throws
   func stop() async
+
+  /// Reads one thread with its turns and returns the raw authoritative
+  /// thread object, used to rebuild state after a restart.
+  func readThread(threadID: String) async throws -> JSONValue
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -38,6 +46,17 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
 
   public func stop() async {
     await client.stop()
+  }
+
+  public func readThread(threadID: String) async throws -> JSONValue {
+    let response = try await client.request(
+      method: "thread/read",
+      params: .object([
+        "threadId": .string(threadID),
+        "includeTurns": .bool(true),
+      ])
+    )
+    return response["thread"]
   }
 }
 
@@ -91,6 +110,15 @@ public actor CodexRuntimeSupervisor {
 
   public func state() -> CodexRuntimeState {
     currentState
+  }
+
+  /// Reads one authoritative thread through the active session. Fails closed
+  /// when the runtime is not ready.
+  public func readThread(threadID: String) async throws -> JSONValue {
+    guard case .ready = currentState, let session else {
+      throw CodexRuntimeRequestError.notReady
+    }
+    return try await session.readThread(threadID: threadID)
   }
 
   public func start() async {

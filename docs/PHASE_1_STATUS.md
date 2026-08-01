@@ -80,13 +80,20 @@ The first distribution and platform assumptions are provisional: personal/TestFl
   - permissions-cancel sends the turn-scoped empty grant and interrupts the exact recorded turn,
   - idempotent replay returns the recorded result for a repeated command ID without re-executing,
   - per-command `outcomeUnknown` transitions and a shared `CommandLedgering` protocol on both the in-memory and encrypted persistent ledgers.
+- Automatic degraded-state recovery (`CodexRuntimeRecoveryCoordinator`):
+  - watches supervisor states and reacts only to degraded states; `unsupported` remains terminal and is never retried,
+  - surfaces all in-flight ledger work as `outcomeUnknown` before any restart so nothing is mistaken for re-executable work,
+  - restarts through the full compatibility gate with capped exponential backoff,
+  - rebuilds thread state only from authoritative `thread/read` snapshots and drops threads that cannot be re-read instead of guessing,
+  - never replays state-changing commands during recovery,
+  - forwards runtime states and content-free recovery milestones on one observable stream.
 
 ## Verification
 
 ```text
-CompanionProtocol/MacBridgeCore tests: 48 passed, 0 failed
+CompanionProtocol/MacBridgeCore tests: 53 passed, 0 failed
 CodexAppServer tests: 18 passed, 0 failed
-Total Swift tests: 66 passed, 0 failed
+Total Swift tests: 71 passed, 0 failed
 Generic iOS 17 arm64 CompanionProtocol build: passed
 macOS release build: passed
 Swift format lint: passed
@@ -111,6 +118,7 @@ Credentials or secrets stored: no
 - Companion snapshots cannot contain raw thread item content.
 - Approval mutation, replay, expiry, cross-request user-presence reuse, and second resolution fail closed.
 - An approval response is sent at most once; unconfirmed or unsendable responses become terminal `outcomeUnknown`/`failed` records and are never retried automatically.
+- Automatic recovery restarts only through the full compatibility gate, rebuilds only from authoritative thread reads, drops unreadable threads instead of guessing, and never replays state-changing commands; an unsupported Codex blocks recovery terminally.
 - Session-wide approval decisions and policy amendments are not representable through the companion protocol.
 - Persistent records are authenticated ciphertext; wrong keys, tampering, oversized records, and unknown database schema versions fail closed.
 - Prompts, command text, paths, thread IDs, and turn IDs do not appear in plaintext ledger bytes.
@@ -122,7 +130,6 @@ Credentials or secrets stored: no
 - Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
 - Wire the Keychain-backed ledger factory to the signed Mac app's Application Support path.
 - Redacted structured logger with content-leak tests.
-- Automatic degraded-state restart/rebuild without replaying state-changing commands.
 - Simulator and physical-device integration once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
 
 Networking, pairing, Bonjour, WSS, and the iOS interface remain Phase 2 and Phase 3 work. They are intentionally not part of this increment.

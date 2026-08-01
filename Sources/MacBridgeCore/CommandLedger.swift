@@ -144,6 +144,10 @@ public protocol CommandLedgering: Sendable {
     at date: Date
   ) async throws
 
+  /// Converts every nonterminal record to `outcomeUnknown`, used when the
+  /// app-server connection is lost and in-flight work becomes ambiguous.
+  func markInFlightOutcomesUnknown(at date: Date) async throws
+
   func record(commandID: UUID) async -> CommandLedgerRecord?
 }
 
