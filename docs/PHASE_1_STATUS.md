@@ -93,13 +93,19 @@ The first distribution and platform assumptions are provisional: personal/TestFl
   - recovery events reduce thread IDs to counts; no thread, turn, request, prompt, command, path, or error text reaches log bytes,
   - unified-logging production sink plus a sink seam for tests,
   - sentinel-injection content-leak tests over every raw-event surface and the whole vocabulary.
+- Bridge composition root (`CodexBridgeAssembly`) and the `codex-micro-bridge` menu-bar shell:
+  - one supervised runtime with automatic recovery, the actor-isolated domain store, the bounded event journal, approval execution, and redacted logging behind a small start/stop/suspend/resume lifecycle,
+  - the assembly is the single consumer of supervisor and recovery streams; the app observes one content-free `updates` stream,
+  - events for unknown threads trigger lazy authoritative `thread/read` rebuilds; journal sequences back companion snapshots and cursor replay,
+  - the Keychain-backed encrypted ledger resolves to the user's Application Support path (`CodexMicro/command-ledger.sqlite`),
+  - a SwiftPM SwiftUI `MenuBarExtra` shell wires launch, system sleep (clean pause without recovery), wake, and quit; menu content is fixed status labels and counts only.
 
 ## Verification
 
 ```text
-CompanionProtocol/MacBridgeCore tests: 57 passed, 0 failed
+CompanionProtocol/MacBridgeCore tests: 62 passed, 0 failed
 CodexAppServer tests: 18 passed, 0 failed
-Total Swift tests: 75 passed, 0 failed
+Total Swift tests: 80 passed, 0 failed
 Generic iOS 17 arm64 CompanionProtocol build: passed
 macOS release build: passed
 Swift format lint: passed
@@ -132,10 +138,9 @@ Credentials or secrets stored: no
 
 ## Remaining Phase 1 work
 
-- Wire the supervisor, domain store, journal, snapshot emission, recovery coordinator, approval executor, and redacted logger into the signed Mac app lifecycle.
+- Package, sign, and notarize the menu-bar shell as a proper `.app` bundle; the SwiftPM `codex-micro-bridge` executable already wires the full production lifecycle, and bundling belongs to the release phase.
 - Live-probe verification that the installed Codex emits `serverRequest/resolved` for bridge-resolved approvals; the executor's reconciliation contract is currently proven against the fake app-server only.
 - Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
-- Wire the Keychain-backed ledger factory to the signed Mac app's Application Support path.
 - Simulator and physical-device integration once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
 
 Networking, pairing, Bonjour, WSS, and the iOS interface remain Phase 2 and Phase 3 work. They are intentionally not part of this increment.

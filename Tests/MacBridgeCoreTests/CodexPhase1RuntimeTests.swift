@@ -312,6 +312,14 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     throw CodexRuntimeRequestError.notReady
   }
 
+  func respondToServerRequest(id: Int64, result: JSONValue) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
+
+  func interruptTurn(threadID: String, turnID: String) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
+
   func yield(_ event: AppServerEvent) {
     continuation.yield(event)
   }

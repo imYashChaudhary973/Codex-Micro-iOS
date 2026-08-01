@@ -4,10 +4,11 @@ Native iPhone companion work for Codex on a Mac. The Mac remains the authoritati
 
 ## Current implementation
 
-Phase 0 verified the installed Codex app-server and the intended IDE-hosted `vscode` session workflow. Phase 1 now includes shared native `CompanionProtocol` and `MacBridgeCore` libraries for semantic phone commands, strict validation, capability/project policy, mobile action profiles, bounded event replay, slot-status derivation, exact Codex compatibility checks, supervised runtime state, deterministic event routing, phone-safe state snapshots, digest-bound pending approvals, an encrypted persistent command ledger, single-send approval-response execution reconciled against `serverRequest/resolved`, automatic degraded-state recovery that rebuilds from authoritative thread reads without replaying commands, and a redacted structured logger whose entries are content-free by construction. A deterministic fake app-server harness (`CodexTestSupport`) contract-tests every consumed notification and approval type, plus malformed and unknown messages, without live Codex turns.
+Phase 0 verified the installed Codex app-server and the intended IDE-hosted `vscode` session workflow. Phase 1 now includes shared native `CompanionProtocol` and `MacBridgeCore` libraries for semantic phone commands, strict validation, capability/project policy, mobile action profiles, bounded event replay, slot-status derivation, exact Codex compatibility checks, supervised runtime state, deterministic event routing, phone-safe state snapshots, digest-bound pending approvals, an encrypted persistent command ledger, single-send approval-response execution reconciled against `serverRequest/resolved`, automatic degraded-state recovery that rebuilds from authoritative thread reads without replaying commands, and a redacted structured logger whose entries are content-free by construction. `CodexBridgeAssembly` composes the full pipeline behind one lifecycle, and `codex-micro-bridge` is the development menu-bar shell that hosts it (it runs the live compatibility probe and app-server on launch). A deterministic fake app-server harness (`CodexTestSupport`) contract-tests every consumed notification and approval type, plus malformed and unknown messages, without live Codex turns.
 
 ```bash
 swift test
+swift run codex-micro-bridge
 swift run codex-micro-spike compatibility
 swift run codex-micro-spike doctor
 swift run codex-micro-spike threads --limit 6
