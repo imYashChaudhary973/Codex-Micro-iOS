@@ -251,29 +251,3 @@ public enum CompanionCommandValidationError: Error, Equatable, Sendable {
   case invalidRequestDigest
   case tooManyAttachments
 }
-
-private struct DynamicCodingKey: CodingKey {
-  let stringValue: String
-  let intValue: Int? = nil
-
-  init?(stringValue: String) {
-    self.stringValue = stringValue
-  }
-
-  init?(intValue: Int) {
-    return nil
-  }
-}
-
-private func rejectUnknownKeys(decoder: Decoder, allowed: Set<String>) throws {
-  let container = try decoder.container(keyedBy: DynamicCodingKey.self)
-  let received = Set(container.allKeys.map(\.stringValue))
-  guard received.isSubset(of: allowed) else {
-    throw DecodingError.dataCorrupted(
-      .init(
-        codingPath: decoder.codingPath,
-        debugDescription: "Command contains unsupported fields."
-      )
-    )
-  }
-}
