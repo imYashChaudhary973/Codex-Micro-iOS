@@ -1,6 +1,6 @@
 # Phase 1 — Mac Bridge Core Status
 
-**Status:** In progress
+**Status:** Accepted
 
 **Snapshot:** 2026-08-01
 
@@ -136,11 +136,20 @@ Credentials or secrets stored: no
 - Persistent records are authenticated ciphertext; wrong keys, tampering, oversized records, and unknown database schema versions fail closed.
 - Prompts, command text, paths, thread IDs, and turn IDs do not appear in plaintext ledger bytes.
 
-## Remaining Phase 1 work
+## Exit-gate verification
 
-- Package, sign, and notarize the menu-bar shell as a proper `.app` bundle; the SwiftPM `codex-micro-bridge` executable already wires the full production lifecycle, and bundling belongs to the release phase.
-- Live-probe verification that the installed Codex emits `serverRequest/resolved` for bridge-resolved approvals; the executor's reconciliation contract is currently proven against the fake app-server only.
-- Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
-- Simulator and physical-device integration once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
+The four Phase 1 exit gates from the architecture plan are met, re-verified on 2026-08-01:
+
+1. **Contract tests cover every consumed event and approval type.** The fake app-server harness drives the real client, domain store, supervisor, executor, recovery coordinator, and assembly through every consumed notification, all four approval kinds, and every decision path; the log method allowlist is test-pinned to exactly the consumed protocol surface.
+2. **Unknown or experimental messages cannot accidentally trigger an action.** Unknown notifications, unknown server requests, unknown methods, unknown command types/fields, malformed lines, methodless messages, and field-incomplete or expired approvals all fail closed in contract tests, and unstubbed fake methods fail closed by default.
+3. **The bridge survives Codex crash/restart and reports degraded state.** Automatic recovery restarts through the compatibility gate with backoff, converts in-flight work to `outcomeUnknown`, rebuilds only from authoritative reads, and reports every transition on a content-free stream; verified for crash, repeated startup failure, unsupported-after-restart, and clean suspend/resume.
+4. **A phone cannot steer or start work above its granted mobile action ceiling.** Capability tests cover grant/profile intersection, cross-project denial, revoked devices, observe-profile natural-language denial, and stale-command rejection.
+
+## Deferred beyond Phase 1
+
+- App-bundle packaging, signing, and notarization of the menu-bar shell — release-phase work; the SwiftPM `codex-micro-bridge` executable already wires the full production lifecycle.
+- Live-probe verification that installed Codex emits `serverRequest/resolved` for bridge-resolved approvals — must run before Phase 2 exposes phone-originated approvals; the reconciliation contract is proven against the fake app-server only.
+- Device-bound phone user-presence assertions — Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
+- Simulator and physical-device integration — Phase 3, once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
 
 Networking, pairing, Bonjour, WSS, and the iOS interface remain Phase 2 and Phase 3 work. They are intentionally not part of this increment.
