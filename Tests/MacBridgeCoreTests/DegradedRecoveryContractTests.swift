@@ -354,4 +354,12 @@ private struct FailingRuntimeSession: CodexRuntimeSession {
   func readThread(threadID: String) async throws -> JSONValue {
     throw CodexRuntimeRequestError.notReady
   }
+
+  func respondToServerRequest(id: Int64, result: JSONValue) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
+
+  func interruptTurn(threadID: String, turnID: String) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
 }

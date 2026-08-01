@@ -21,6 +21,8 @@ extension CodexAppServerClient: CodexApprovalResponding {
   }
 }
 
+extension CodexRuntimeSupervisor: CodexApprovalResponding {}
+
 public enum ApprovalExecutionError: Error, Equatable, Sendable {
   case unsupportedCommand
 }

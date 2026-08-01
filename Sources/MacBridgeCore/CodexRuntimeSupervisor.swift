@@ -29,6 +29,12 @@ public protocol CodexRuntimeSession: Sendable {
   /// Reads one thread with its turns and returns the raw authoritative
   /// thread object, used to rebuild state after a restart.
   func readThread(threadID: String) async throws -> JSONValue
+
+  /// Sends an explicitly prepared response to a server-initiated request.
+  func respondToServerRequest(id: Int64, result: JSONValue) async throws
+
+  /// Interrupts exactly one turn.
+  func interruptTurn(threadID: String, turnID: String) async throws
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -57,6 +63,14 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
       ])
     )
     return response["thread"]
+  }
+
+  public func respondToServerRequest(id: Int64, result: JSONValue) async throws {
+    try await client.respondToServerRequest(id: id, result: result)
+  }
+
+  public func interruptTurn(threadID: String, turnID: String) async throws {
+    try await client.interruptTurn(threadID: threadID, turnID: turnID)
   }
 }
 
@@ -115,10 +129,22 @@ public actor CodexRuntimeSupervisor {
   /// Reads one authoritative thread through the active session. Fails closed
   /// when the runtime is not ready.
   public func readThread(threadID: String) async throws -> JSONValue {
+    try await readySession().readThread(threadID: threadID)
+  }
+
+  public func respondToServerRequest(id: Int64, result: JSONValue) async throws {
+    try await readySession().respondToServerRequest(id: id, result: result)
+  }
+
+  public func interruptTurn(threadID: String, turnID: String) async throws {
+    try await readySession().interruptTurn(threadID: threadID, turnID: turnID)
+  }
+
+  private func readySession() throws -> any CodexRuntimeSession {
     guard case .ready = currentState, let session else {
       throw CodexRuntimeRequestError.notReady
     }
-    return try await session.readThread(threadID: threadID)
+    return session
   }
 
   public func start() async {

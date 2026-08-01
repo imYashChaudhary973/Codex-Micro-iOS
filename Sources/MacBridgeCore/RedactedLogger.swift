@@ -50,6 +50,9 @@ public enum BridgeLogEvent: Equatable, Sendable {
   case commandReplayed(kind: CompanionCommandKind)
   case commandFinished(state: CommandLifecycleState, resultCode: CommandResultCode)
   case ledgerOperationFailed(operation: LedgerOperation)
+  /// A raw event failed routing/validation and was discarded. The cause is
+  /// deliberately not serialized; the fail-closed outcome is the message.
+  case eventDiscarded
 }
 
 public enum BridgeLogLevel: String, Codable, Equatable, Sendable {
@@ -258,6 +261,10 @@ public struct RedactedLogger: Sendable {
         level: .error,
         code: "ledger.operationFailed.\(operation.rawValue)",
         counts: [:]
+      )
+    case .eventDiscarded:
+      RedactedLogEntry(
+        timestamp: date, level: .warning, code: "event.discarded", counts: [:]
       )
     }
   }
