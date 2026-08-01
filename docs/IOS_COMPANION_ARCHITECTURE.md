@@ -1,6 +1,6 @@
 # Codex Micro for iPhone — System Architecture and Build Plan
 
-**Status:** Approved architecture; Phase 0 accepted; Phase 1 in progress
+**Status:** Approved architecture; Phase 0 accepted; Phase 1 accepted
 
 **Date:** 2026-07-31
 
@@ -718,7 +718,7 @@ Never record prompt text, response text, diffs, paths, command output, tokens, p
 - Encrypted, content-free command ledger with `outcomeUnknown` recovery.
 - Fake app-server for deterministic tests.
 
-**Current implementation:** The shared core now has the exact CLI/schema gate for Codex 0.146.0, a runtime supervisor, deterministic thread/turn routing, an actor-isolated domain store, normalized content-free snapshots and pending approvals, bounded replay, capability policy, canonical approval digests/expiry, user-presence gating, and an AES-GCM-encrypted SQLite command ledger with a Keychain key provider. Live approval-response wiring, phone device-bound user-presence assertions, redacted logging, complete fake scenarios, and automatic restart/rebuild remain open.
+**Current implementation:** Phase 1 is accepted. The shared core has the exact CLI/schema gate for Codex 0.146.0, a runtime supervisor, deterministic thread/turn routing, an actor-isolated domain store, normalized content-free snapshots and pending approvals, bounded replay, capability policy, canonical approval digests/expiry, user-presence gating, an AES-GCM-encrypted SQLite command ledger with a Keychain key provider, single-send approval-response execution reconciled against `serverRequest/resolved`, automatic degraded-state recovery, a redacted structured logger, a deterministic fake app-server contract harness, and the `codex-micro-bridge` menu-bar assembly shell. Evidence and deferred items are recorded in the Phase 1 status document.
 
 **Exit gate**
 
