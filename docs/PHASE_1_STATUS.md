@@ -87,13 +87,19 @@ The first distribution and platform assumptions are provisional: personal/TestFl
   - rebuilds thread state only from authoritative `thread/read` snapshots and drops threads that cannot be re-read instead of guessing,
   - never replays state-changing commands during recovery,
   - forwards runtime states and content-free recovery milestones on one observable stream.
+- Redacted structured logger (`RedactedLogger`):
+  - a closed log-event vocabulary whose associated values are enums and integers only; free-form strings cannot enter an entry without adding a reviewed case,
+  - raw app-server events map through a method allowlist; unknown method names and all params/warning text are discarded, never logged,
+  - recovery events reduce thread IDs to counts; no thread, turn, request, prompt, command, path, or error text reaches log bytes,
+  - unified-logging production sink plus a sink seam for tests,
+  - sentinel-injection content-leak tests over every raw-event surface and the whole vocabulary.
 
 ## Verification
 
 ```text
-CompanionProtocol/MacBridgeCore tests: 53 passed, 0 failed
+CompanionProtocol/MacBridgeCore tests: 57 passed, 0 failed
 CodexAppServer tests: 18 passed, 0 failed
-Total Swift tests: 71 passed, 0 failed
+Total Swift tests: 75 passed, 0 failed
 Generic iOS 17 arm64 CompanionProtocol build: passed
 macOS release build: passed
 Swift format lint: passed
@@ -119,17 +125,17 @@ Credentials or secrets stored: no
 - Approval mutation, replay, expiry, cross-request user-presence reuse, and second resolution fail closed.
 - An approval response is sent at most once; unconfirmed or unsendable responses become terminal `outcomeUnknown`/`failed` records and are never retried automatically.
 - Automatic recovery restarts only through the full compatibility gate, rebuilds only from authoritative thread reads, drops unreadable threads instead of guessing, and never replays state-changing commands; an unsupported Codex blocks recovery terminally.
+- Log entries are content-free by construction: only allowlisted method names, closed reason codes, and numeric counts can be serialized, verified by sentinel-injection leak tests.
 - Session-wide approval decisions and policy amendments are not representable through the companion protocol.
 - Persistent records are authenticated ciphertext; wrong keys, tampering, oversized records, and unknown database schema versions fail closed.
 - Prompts, command text, paths, thread IDs, and turn IDs do not appear in plaintext ledger bytes.
 
 ## Remaining Phase 1 work
 
-- Wire the supervisor, domain store, journal, and snapshot emission into the signed Mac app lifecycle.
+- Wire the supervisor, domain store, journal, snapshot emission, recovery coordinator, approval executor, and redacted logger into the signed Mac app lifecycle.
 - Live-probe verification that the installed Codex emits `serverRequest/resolved` for bridge-resolved approvals; the executor's reconciliation contract is currently proven against the fake app-server only.
 - Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
 - Wire the Keychain-backed ledger factory to the signed Mac app's Application Support path.
-- Redacted structured logger with content-leak tests.
 - Simulator and physical-device integration once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
 
 Networking, pairing, Bonjour, WSS, and the iOS interface remain Phase 2 and Phase 3 work. They are intentionally not part of this increment.
