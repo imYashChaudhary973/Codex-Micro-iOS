@@ -72,13 +72,21 @@ The first distribution and platform assumptions are provisional: personal/TestFl
   - adversarial malformed-line, methodless, unknown-notification, unknown-server-request, invalid-approval, and expired-approval shapes,
   - crash, clean-close, and request-timeout simulation,
   - contract tests that drive the real app-server client, domain store, and runtime supervisor through every scenario and assert that no server request is ever answered automatically.
+- Approval-response executor (`ApprovalResolutionExecutor`) wiring prepared approval resolutions to the app-server client:
+  - ledger lifecycle around every send: `submitting` → policy-gated preparation → single send → `submitted` → `serverRequest/resolved` reconciliation → terminal outcome,
+  - policy rejections (missing user presence, digest mismatch, expiry, not pending) terminate as `declined`/`rejectedByPolicy` before anything is sent,
+  - a response is sent at most once; missing confirmation becomes durable `outcomeUnknown` with a `confirmationTimedOut` result code and is never resent,
+  - send failures on a dead connection terminate as `failed`/`codexUnavailable` with the approval surfaced for Mac-side review,
+  - permissions-cancel sends the turn-scoped empty grant and interrupts the exact recorded turn,
+  - idempotent replay returns the recorded result for a repeated command ID without re-executing,
+  - per-command `outcomeUnknown` transitions and a shared `CommandLedgering` protocol on both the in-memory and encrypted persistent ledgers.
 
 ## Verification
 
 ```text
-CompanionProtocol/MacBridgeCore tests: 40 passed, 0 failed
+CompanionProtocol/MacBridgeCore tests: 48 passed, 0 failed
 CodexAppServer tests: 18 passed, 0 failed
-Total Swift tests: 58 passed, 0 failed
+Total Swift tests: 66 passed, 0 failed
 Generic iOS 17 arm64 CompanionProtocol build: passed
 macOS release build: passed
 Swift format lint: passed
@@ -102,6 +110,7 @@ Credentials or secrets stored: no
 - Unknown Codex versions, changed schemas, unknown turns, and conflicting turn-to-thread routes fail closed.
 - Companion snapshots cannot contain raw thread item content.
 - Approval mutation, replay, expiry, cross-request user-presence reuse, and second resolution fail closed.
+- An approval response is sent at most once; unconfirmed or unsendable responses become terminal `outcomeUnknown`/`failed` records and are never retried automatically.
 - Session-wide approval decisions and policy amendments are not representable through the companion protocol.
 - Persistent records are authenticated ciphertext; wrong keys, tampering, oversized records, and unknown database schema versions fail closed.
 - Prompts, command text, paths, thread IDs, and turn IDs do not appear in plaintext ledger bytes.
@@ -109,7 +118,7 @@ Credentials or secrets stored: no
 ## Remaining Phase 1 work
 
 - Wire the supervisor, domain store, journal, and snapshot emission into the signed Mac app lifecycle.
-- Wire prepared approval responses to the live app-server and reconcile `serverRequest/resolved` before recording final command outcomes.
+- Live-probe verification that the installed Codex emits `serverRequest/resolved` for bridge-resolved approvals; the executor's reconciliation contract is currently proven against the fake app-server only.
 - Add device-bound phone user-presence assertions during Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
 - Wire the Keychain-backed ledger factory to the signed Mac app's Application Support path.
 - Redacted structured logger with content-leak tests.

@@ -49,6 +49,7 @@ public final class FakeCodexAppServer: JSONLineTransport, @unchecked Sendable {
   private let continuation: AsyncThrowingStream<Data, Error>.Continuation
   private let lock = NSLock()
   private var handlers: [String: RequestHandler]
+  private var responseFollowUps: [Int64: [JSONValue]] = [:]
   private var received: [JSONValue] = []
   private var finished = false
 
@@ -71,6 +72,15 @@ public final class FakeCodexAppServer: JSONLineTransport, @unchecked Sendable {
 
   public func stubResult(_ method: String, _ result: JSONValue, followUps: [JSONValue] = []) {
     stub(method) { _, _ in .result(result, followUps: followUps) }
+  }
+
+  /// Emits the given messages the instant the client responds to the
+  /// server-initiated request with this RPC ID — the tightest possible race
+  /// between a sent response and its confirmation notification.
+  public func onServerRequestResponse(rpcID: Int64, emit followUps: [JSONValue]) {
+    lock.lock()
+    responseFollowUps[rpcID] = followUps
+    lock.unlock()
   }
 
   /// Emits a complete JSON-RPC message (notification or server request) to
@@ -132,7 +142,17 @@ public final class FakeCodexAppServer: JSONLineTransport, @unchecked Sendable {
     received.append(message)
     lock.unlock()
 
-    guard let method = message["method"].string else { return }
+    guard let method = message["method"].string else {
+      if let responseID = message["id"].integer {
+        lock.lock()
+        let followUps = responseFollowUps.removeValue(forKey: responseID)
+        lock.unlock()
+        for followUp in followUps ?? [] {
+          try emit(followUp)
+        }
+      }
+      return
+    }
     guard let id = message["id"].integer else { return }
 
     lock.lock()
