@@ -181,6 +181,18 @@ public actor PersistentCommandLedger {
     records[commandID] = record
   }
 
+  public func markOutcomeUnknown(
+    commandID: UUID,
+    resultCode: CommandResultCode = .bridgeRestartedBeforeOutcome,
+    at date: Date = Date()
+  ) throws {
+    guard var record = records[commandID] else { throw CommandLedgerError.missingCommand }
+    guard !record.state.isTerminal else { throw CommandLedgerError.invalidTransition }
+    record.markOutcomeUnknown(resultCode: resultCode, at: date)
+    try storage.save(record)
+    records[commandID] = record
+  }
+
   public func record(commandID: UUID) -> CommandLedgerRecord? {
     records[commandID]
   }
@@ -195,6 +207,8 @@ public actor PersistentCommandLedger {
     }
   }
 }
+
+extension PersistentCommandLedger: CommandLedgering {}
 
 private final class EncryptedLedgerStorage: @unchecked Sendable {
   private static let schemaVersion: Int32 = 1

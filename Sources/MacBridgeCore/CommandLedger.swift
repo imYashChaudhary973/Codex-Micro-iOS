@@ -27,6 +27,7 @@ public enum CommandResultCode: String, Codable, Equatable, Sendable {
   case invalidRequest
   case codexUnavailable
   case bridgeRestartedBeforeOutcome
+  case confirmationTimedOut
 }
 
 public struct CommandLedgerRecord: Codable, Equatable, Sendable {
@@ -91,9 +92,12 @@ public struct CommandLedgerRecord: Codable, Equatable, Sendable {
     updatedAt = date
   }
 
-  mutating func markOutcomeUnknown(at date: Date) {
+  mutating func markOutcomeUnknown(
+    resultCode: CommandResultCode = .bridgeRestartedBeforeOutcome,
+    at date: Date
+  ) {
     state = .outcomeUnknown
-    resultCode = .bridgeRestartedBeforeOutcome
+    self.resultCode = resultCode
     updatedAt = date
   }
 }
@@ -108,6 +112,39 @@ public enum CommandLedgerError: Error, Equatable, Sendable {
   case missingCommand
   case invalidTransition
   case invalidTerminalState
+}
+
+/// The ledger operations command executors depend on, satisfied by both the
+/// in-memory prototype and the encrypted persistent ledger.
+public protocol CommandLedgering: Sendable {
+  func register(
+    deviceID: UUID,
+    command: ClientCommand,
+    at date: Date
+  ) async throws -> CommandRegistration
+
+  func markSubmitted(
+    commandID: UUID,
+    threadID: String?,
+    turnID: String?,
+    requestID: String?,
+    at date: Date
+  ) async throws
+
+  func finish(
+    commandID: UUID,
+    state: CommandLifecycleState,
+    resultCode: CommandResultCode,
+    at date: Date
+  ) async throws
+
+  func markOutcomeUnknown(
+    commandID: UUID,
+    resultCode: CommandResultCode,
+    at date: Date
+  ) async throws
+
+  func record(commandID: UUID) async -> CommandLedgerRecord?
 }
 
 public actor InMemoryCommandLedger {
@@ -184,10 +221,23 @@ public actor InMemoryCommandLedger {
     }
   }
 
+  public func markOutcomeUnknown(
+    commandID: UUID,
+    resultCode: CommandResultCode = .bridgeRestartedBeforeOutcome,
+    at date: Date = Date()
+  ) throws {
+    guard var record = records[commandID] else { throw CommandLedgerError.missingCommand }
+    guard !record.state.isTerminal else { throw CommandLedgerError.invalidTransition }
+    record.markOutcomeUnknown(resultCode: resultCode, at: date)
+    records[commandID] = record
+  }
+
   public func record(commandID: UUID) -> CommandLedgerRecord? {
     records[commandID]
   }
 }
+
+extension InMemoryCommandLedger: CommandLedgering {}
 
 public enum CommandFingerprint {
   public static func digest(_ command: ClientCommand) throws -> String {
