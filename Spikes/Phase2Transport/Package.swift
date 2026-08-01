@@ -8,7 +8,8 @@ let package = Package(
     .macOS(.v14)
   ],
   products: [
-    .library(name: "Phase2Transport", targets: ["Phase2Transport"])
+    .library(name: "Phase2Transport", targets: ["Phase2Transport"]),
+    .executable(name: "phase2-transport-probe", targets: ["Phase2TransportProbe"]),
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-nio.git", exact: "2.101.3"),
@@ -25,6 +26,10 @@ let package = Package(
         .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
         .product(name: "X509", package: "swift-certificates"),
       ]
+    ),
+    .executableTarget(
+      name: "Phase2TransportProbe",
+      dependencies: ["Phase2Transport"]
     ),
     .testTarget(
       name: "Phase2TransportTests",
