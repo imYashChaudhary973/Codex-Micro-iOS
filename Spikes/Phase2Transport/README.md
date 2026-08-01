@@ -84,7 +84,7 @@ The observed loopback pin closure is feasibility evidence only. Whether this exa
 - Bonjour registration uses a cancellable timeout. Success cancels the timer; losing timeout/add callbacks cannot mutate the service. Remove-after-success triggers server termination.
 - Pure tests prove timeout/add/stop/remove winner behavior and that a losing timeout does not remove a published service.
 
-No stable Bonjour publication has been observed on this machine. The earlier signed LAN run reached listener readiness but publication timed out and rolled back.
+An early basic-signed run timed out during Bonjour registration and rolled back. After automatic provisioning and the waiter race fixes, one signed LAN run published successfully and completed the pinned exchange; stability and multi-network behavior remain unproven.
 
 ### Separate lifecycle-generation model
 
@@ -180,4 +180,4 @@ The LAN command uses only content-neutral bytes. Publication failure or teardown
 8. Lifecycle generation is model-only and not connected to authentication.
 9. `NWListener.service` is public, but NIOTS warns that arbitrary underlying-listener modification is unsupported; continued physical evidence is required before production adoption.
 
-See `EVIDENCE.md` for the sanitized result classification. No candidate commit SHA or Phase 2 acceptance claim exists for this uncommitted working copy.
+See `EVIDENCE.md` for the sanitized result classification. The signed evidence chain was re-run from the tree squash-merged as c6577b7 (#10). No Phase 2 acceptance claim is made; physical-iPhone evidence remains Step 2.14 scope.

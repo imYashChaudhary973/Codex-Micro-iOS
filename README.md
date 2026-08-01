@@ -27,10 +27,10 @@ The resume probe loads no turn and redacts thread content. The restart probe cre
 
 The compatibility probe resolves one absolute Codex executable, canonicalizes its generated JSON schema bundle, and checks the exact version and digest against the Phase 1 allowlist before a supervised bridge session may start.
 
-The implementation does not yet expose a network listener, pair a phone, or include the iOS UI. Approval transport execution and device-bound phone user-presence proofs are not wired yet. The existing CLI probes remain development-only and require explicit confirmation for live turns.
+The implementation does not yet expose a production network listener, pair a phone, or include the iOS UI. The phone approval path is closed for all of Phase 2 — the network gateway rejects `resolveApproval`, and approval transport plus device-bound user-presence proofs are Phase 4 work. The existing CLI probes remain development-only and require explicit confirmation for live turns.
 
 See [the system architecture](docs/IOS_COMPANION_ARCHITECTURE.md) for the full design and phased delivery plan.
 Branching, commit, PR, and merge conventions are defined in [the Git workflow](docs/GIT_WORKFLOW.md).
-Current evidence and unresolved feasibility gates are tracked in [the Phase 0 status](docs/PHASE_0_STATUS.md).
+Accepted Phase 0 evidence and recorded limitations are tracked in [the Phase 0 status](docs/PHASE_0_STATUS.md).
 Phase 1 Mac bridge evidence is tracked in [the Phase 1 status](docs/PHASE_1_STATUS.md).
-Approved Phase 2 work will follow [the secure pairing and networking execution plan](docs/PHASE_2_PLAN.md): P0 security contracts and observe-only networking first, then individually gated semantic commands.
+Phase 2 follows [the secure pairing and networking execution plan](docs/PHASE_2_PLAN.md): P0 security contracts and observe-only networking first, then individually gated semantic commands. Step 2.1 is accepted — [the threat model](docs/THREAT_MODEL.md) and [transport/TLS ADR](docs/PHASE_2_TRANSPORT_ADR.md) are the Phase 2 baseline, with evidence in [the Phase 2 status](docs/PHASE_2_STATUS.md) — and Step 2.2 (strict wire contracts) is next. The transport decisions rest on the merged evidence spike at `Spikes/Phase2Transport`, an isolated non-production package that proved the Secure Enclave identity and hardened NIOTS TLS/WSS stack on a signed Mac.

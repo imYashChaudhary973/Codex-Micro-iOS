@@ -1,8 +1,8 @@
 # Codex Micro for iPhone — System Architecture and Build Plan
 
-**Status:** Approved architecture; Phase 0 accepted; Phase 1 accepted; Phase 2 approved and planned
+**Status:** Approved architecture; Phase 0 accepted; Phase 1 accepted; Phase 2 approved and planned — Step 2.1 (threat model and transport ADR) accepted
 
-**Date:** 2026-07-31
+**Date:** 2026-08-02
 
 **Audience:** Product owner and implementation team
 
@@ -11,7 +11,7 @@
 Build a native iOS companion backed by a small native macOS bridge. The Mac remains the authoritative Codex execution host. The iPhone displays normalized thread state, streams progress, sends prompts, and answers tightly scoped approval requests. It never receives the user's OpenAI credential and never executes repository tools itself.
 
 ```text
-┌──────────────────────┐       WSS / typed protocol       ┌────────────────────────┐
+┌──────────────────────┐   WSS + mandatory app-frame AEAD  ┌────────────────────────┐
 │ Codex Micro iPhone   │◀────────────────────────────────▶│ Codex Micro Mac Bridge │
 │ SwiftUI + Keychain   │  local LAN or private tailnet    │ Swift + Keychain       │
 └──────────────────────┘                                  └───────────┬────────────┘
@@ -88,7 +88,7 @@ If item 6 fails, the honest options are to use official Remote or position this 
 
 1. **Mac authoritative:** repositories, credentials, Codex configuration, tools, skills, and action execution stay on the Mac.
 2. **Phone controlled:** every command from the phone maps to a small allowlisted capability and an independently enforced mobile action ceiling.
-3. **Least privilege:** pairing grants `view`, `respond`, `runAgent`, `approve`, `interrupt`, and `startThread` separately. `runAgent` is intentionally treated as powerful because a prompt can cause tools to run.
+3. **Least privilege:** pairing grants `observe`, `respond`, `runAgent`, `approve`, `interrupt`, and `startThread` separately. `runAgent` is intentionally treated as powerful because a prompt can cause tools to run. `approve` and `respond` are Phase 4 capabilities — the Phase 2 network gateway rejects them; `startThread` is conditional on the Step 2.12 product decision.
 4. **No credential copying:** Codex and provider authentication remain inside the Mac's existing Codex setup.
 5. **Local first:** LAN operation works without a product backend. Remote access initially uses a user-owned private tailnet.
 6. **Event-derived UI:** the Mac bridge normalizes app-server events into a stable, versioned companion protocol.
@@ -126,11 +126,11 @@ Responsibilities:
 - Initializes app-server once per connection and subscribes only to required stable events.
 - Converts Codex thread, turn, item, diff, and approval messages into companion domain objects.
 - Waits for the matching `turn/started` event before issuing turn-scoped controls such as interruption; a successful `turn/start` response alone does not prove the turn is already controllable.
-- Maintains a memory-only bounded event journal with monotonically increasing sequence numbers.
+- Maintains a memory-only bounded event journal with monotonically increasing sequence numbers. This Phase 1 journal is an internal global namespace; Phase 2 never exposes it on the network — `MacBridgeCore` assigns per-device sequences only within each device's authorized-view namespace and returns already-filtered batches.
 - Enforces device grants, project allowlists, approval scope, rate limits, and replay protection.
 - Enforces a `MobileActionProfile` that is never broader than the device grant or the Mac's Codex policy. A phone cannot steer a turn whose effective permissions exceed its profile.
 - Publishes LAN discovery with Bonjour after LAN companion access is explicitly enabled by the user.
-- Hosts the authenticated WSS endpoint and short-lived attachment downloads.
+- Hosts the authenticated WSS endpoint; short-lived attachment downloads are post-Phase 2 scope.
 - Stores host identity, paired-device public keys, grants, and revocation state in macOS Keychain or an encrypted local store.
 - Redacts logs and provides an exportable diagnostic bundle without prompts, diffs, credentials, or repository contents by default.
 
@@ -199,7 +199,7 @@ Do not build this backend until LAN and Tailscale usage prove the product is val
 ### 6.1 Mode A — same LAN
 
 - Mac bridge advertises `_codexmicro._tcp` with Bonjour.
-- Bonjour TXT records contain only protocol version, host display name, and host ID prefix. They contain no secret.
+- Bonjour uses an exact content-neutral service-instance/TXT-key allowlist. It contains no host/device name, identifier, fingerprint, project data, user content, or secret.
 - iPhone connects with `wss://` to the discovered endpoint.
 - The TLS host certificate/public-key fingerprint is pinned during QR pairing.
 - Discovery never implies authorization; unpaired clients cannot subscribe or invoke commands.
@@ -230,11 +230,11 @@ It does not make a sleeping Mac runnable. The Mac must stay awake, online, signe
 - One foreground socket per selected host.
 - Ping every 20–30 seconds while foregrounded; close cleanly on background transition.
 - Exponential reconnect with full jitter: approximately 0.5 s, 1 s, 2 s, 4 s, up to 30 s.
-- The phone sends `resumeFromSequence` after reconnect.
-- The bridge replays retained events or sends a complete snapshot when the cursor is too old.
+- After reconnect, the phone sends a sealed cursor envelope containing device ID, current grant revision, authorized-view epoch, journal epoch, and sequence.
+- The bridge replays only retained events in that device's current authorized-view namespace. Older revision/view, foreign epoch, or retention-stale cursors receive a filtered snapshot; mismatched-device, ahead, rolled-back, overflowing, or malformed cursors fail closed.
 - State-changing command retry uses the same idempotency key.
 - Backpressure is explicit. Terminal deltas are batched, bounded, and may be summarized before ordinary chat events are delayed.
-- Large diffs, screenshots, and attachments are represented by short-lived authenticated references rather than placed in a WebSocket frame.
+- Large diffs, screenshots, and attachments (post-Phase 2 scope) are represented by short-lived authenticated references rather than placed in a WebSocket frame.
 
 ## 7. Pairing and authentication
 
@@ -250,23 +250,23 @@ It does not make a sleeping Mac runnable. The Mac must stay awake, online, signe
 
 ### 7.2 QR payload
 
-The QR code contains:
+The QR code carries exactly the ADR §12 allowlist and nothing else:
 
 ```json
 {
   "version": 1,
+  "protocolFeatures": "exact-supported-set",
   "hostId": "opaque-id",
-  "hostName": "Yash's MacBook",
   "endpoint": "wss://192.0.2.10:48321/pair",
   "hostIdentityFingerprint": "sha256-base64url",
   "tlsSPKIFingerprint": "sha256-base64url",
   "pairingSessionId": "opaque-id",
   "oneTimeSecret": "256-bit-base64url",
-  "expiresAt": "2026-07-31T20:15:00Z"
+  "expiresAt": "2026-08-02T20:15:00Z"
 }
 ```
 
-The pairing secret is deliberately a raw **bootstrap credential** inside the QR. It expires after five minutes, is single-use, and is never logged. It is not a Codex, account, or long-lived device credential. Showing the QR requires the user to unlock the Mac app.
+There is deliberately **no `hostName`** or other display metadata in the QR: the phone pins the current TLS SPKI from the QR, verifies the host through the signed pairing transcript, and learns a display name only from the authenticated exchange. The pairing secret is deliberately a raw **bootstrap credential** inside the QR. It expires after five minutes, is single-use, and is never logged. It is not a Codex, account, or long-lived device credential. Showing the QR requires the user to unlock the Mac app.
 
 ### 7.3 Pairing sequence
 
@@ -293,35 +293,38 @@ The canonical transcript is:
 
 ```text
 SHA256(
-  "codex-micro-pair-v1" || hostId || hostIdentityPublicKey ||
-  deviceId || devicePublicKey || pairingSessionId || expiresAt ||
-  clientNonce || serverNonce || negotiatedProtocolVersion || pairingMode ||
-  normalizedEndpointOrigin || initialTLSSPKIFingerprint
+  CanonicalLengthDelimitedEncoding(
+    context: "codex-micro-pair-v1",
+    hostId, hostIdentityPublicKey, deviceId, devicePublicKey,
+    pairingSessionId, expiresAt, clientNonce, serverNonce,
+    exactNegotiatedProtocolAndFeatures, pairingMode,
+    normalizedEndpointOrigin, initialTLSSPKIFingerprint
+  )
 )
 ```
 
-`pairingMode` distinguishes direct LAN, direct tailnet, and an explicitly supported TLS-terminating proxy. The normalized endpoint contains scheme, lowercase host, and port with no user info, path variation, query, or fragment. The bootstrap secret authenticates the first pairing request. The Mac and iPhone then sign the canonical transcript with their long-term identity keys. The six-word verification phrase is derived from the first 66 bits of `HKDF-SHA256(transcriptHash, info: "pairing-sas-v1")` using a fixed 2,048-word list. Both the Mac user and phone user must explicitly confirm that the phrases match. Pairing completes only after both confirmations, valid signatures, a transcript-bound transport identity, and a still-unused bootstrap secret.
+Phase 2 accepts only `directLAN` pairing mode; tailnet and TLS-terminating proxy modes require later-phase threat models. The normalized endpoint contains scheme, lowercase host, and port with no user info, path variation, query, or fragment. The exactly 256-bit CSPRNG bootstrap secret is compared in constant time and atomically claimed before signature verification; any completed claim consumes it regardless of outcome. The Mac and iPhone sign the versioned, length-delimited canonical transcript with their long-term identity keys. The six-word verification phrase derives from exactly 66 uniformly distributed bits using a fixed versioned 2,048-word list. Both users confirm locally; a peer-supplied confirmation is never a substitute. Pairing completes only after both local confirmations, valid signatures, and transcript-bound transport identity. The signed grant stored on the phone is a **non-authoritative receipt** for display and reconnect bookkeeping; the Mac's stored grant authority is the only authorization source at every authentication and command check, and a phone-presented grant can never override it.
 
 ### 7.4 Normal session authentication
 
 1. TLS validates the pinned TLS SPKI or a valid host-identity-signed TLS rotation.
 2. Phone and bridge exchange ephemeral P-256 ECDH keys plus fresh nonces.
-3. Phone signs the connection transcript containing both ephemeral keys, both nonces, host ID, device ID, negotiated protocol version, and authorization epoch.
-4. Bridge verifies the paired public key and revocation state, then signs the same transcript.
+3. Phone signs the versioned, length-delimited connection transcript containing both ephemeral keys, both nonces, host ID, device ID, exact negotiated protocol/features, the current device grant revision and authorized-view epoch, and host generation.
+4. Bridge verifies the paired public key against the current Mac-stored grant/revocation authority, then signs the same transcript.
 5. Both sides derive separate client-to-server and server-to-client authenticated-encryption keys with HKDF-SHA256 over the ECDH shared secret and transcript hash.
-6. The bridge issues a short-lived session identifier bound to the connection, device grant, and authorization epoch. It is not a bearer credential.
+6. The bridge issues a short-lived session identifier bound to the connection, current device grant revision, authorized-view epoch, and host generation. It is not a bearer credential.
 7. Every post-handshake application payload in both directions is sealed with ChaCha20-Poly1305. The clear frame header contains only protocol version, connection ID, direction, and a strictly increasing per-direction counter; that complete header is authenticated as additional data.
 8. Every command inside the sealed payload also carries the session ID, command ID, timestamp, and request digest.
 
-Each side holds the accepted counter high-water mark for the opposite direction in its connection actor and rejects duplicate, skipped beyond-policy, stale, or unauthenticated frames. Nonces are deterministically derived from the connection ID, direction, and counter and can never repeat for a key. A reconnect always creates a new connection ID, ECDH keys, and counter spaces, so captured frames cannot cross connections. Handshake frames before key derivation are bound by the identity signatures. No long-lived bearer credential is stored on the phone.
+Each side accepts exactly the next counter for the opposite direction and closes on any duplicate, gap, wrong direction, overflow, tamper, or unauthenticated frame. A versioned injective 96-bit nonce encoding is fixed by golden vectors under fresh per-direction keys. A reconnect always creates a new connection ID, ECDH keys, and counter spaces, so captured frames cannot cross connections. Handshake frames before key derivation are bound by identity signatures. No long-lived bearer credential is stored on the phone.
 
 ### 7.5 Revocation
 
-The Mac's Connections screen shows each device, last seen time, granted capabilities, and key fingerprint. Revocation immediately closes active sockets, increments the host authorization epoch, and rejects any older session identifier. The phone removes the host locally when it learns of revocation.
+The Mac's Connections screen shows each device, last seen time, granted capabilities, project scope, grant revision, expiry, and key fingerprint. Revocation/reduction/expiry is linearizable: persist the device revision or tombstone, publish it to every authorization check, purge unauthorized queued data/results, advance the device's authorized-view epoch when scope changes, then close or reauthenticate every affected connection. Ordinary revocation does not invalidate unrelated devices; host generation changes only for intentional host-wide invalidation. The phone removes the host locally when it learns of revocation.
 
 ## 8. Companion protocol
 
-Use Codable JSON envelopes with an explicit major/minor protocol version inside the authenticated-encryption layer. JSON is easy to inspect in sanitized development traces, contract-test, and evolve; it is not the performance bottleneck for human-speed agent events. Production WebSocket payloads after authentication carry a small clear counter header plus ChaCha20-Poly1305 ciphertext, never plaintext envelope content.
+Use strict Codable JSON envelopes with exact minor/feature negotiation inside the authenticated-encryption layer. Security/control types reject unknown fields and message types; major-only compatibility is insufficient at this boundary. JSON remains easy to inspect in sanitized development traces, contract-test, and evolve. Production WebSocket payloads after authentication carry a small clear authenticated counter header plus ChaCha20-Poly1305 ciphertext, never plaintext envelope content.
 
 ```swift
 struct Envelope<Payload: Codable>: Codable {
@@ -340,7 +343,7 @@ Message families:
 - `server.challenge`
 - `client.authenticate`
 - `server.authenticated`
-- `client.subscribe(resumeFromSequence:)`
+- `client.subscribe(replayCursor:)`
 - `server.snapshot`
 - `server.event`
 - `client.command`
@@ -351,12 +354,12 @@ Message families:
 
 Commands are semantic, not generic RPC:
 
-- `selectThread`
-- `startThread(projectId, prompt)`
-- `sendPrompt(threadId, prompt, attachments)`
+- `selectThread` — phone-local UI state, never sent to the Mac
+- `startThread(projectId, prompt)` — conditional on the Step 2.12 product decision
+- `sendPrompt(threadId, prompt, attachments)` — nonempty `attachmentIDs` are rejected until a post-Phase 2 attachment service exists
 - `steerTurn(threadId, turnId, prompt)`
 - `interruptTurn(threadId, turnId)`
-- `resolveApproval(requestId, decision, requestDigest)`
+- `resolveApproval(requestId, decision, requestDigest)` — rejected throughout Phase 2; Phase 4 defines approval transport and the device-bound user-presence assertion
 - `markThreadRead(threadId, throughSequence)`
 
 Every command response echoes its idempotency key. Unknown commands fail closed. The bridge rejects project paths from the phone; the phone sends an opaque project ID previously issued by the Mac.
@@ -392,10 +395,10 @@ The UI never describes a host as ready until authentication and snapshot synchro
 - display name
 - host public-key fingerprint
 - bridge version
-- supported protocol range
+- exact supported protocol minor/feature set
 - Codex version and supported schema hash
 - connection availability
-- authorization epoch
+- host generation
 
 **DeviceGrant**
 
@@ -403,6 +406,7 @@ The UI never describes a host as ready until authentication and snapshot synchro
 - device name and public key
 - granted capabilities
 - permitted project IDs
+- grant revision and authorized-view epoch
 - created, last-seen, and optional expiry timestamps
 - revoked timestamp
 
@@ -438,9 +442,9 @@ The UI never describes a host as ready until authentication and snapshot synchro
 - created and expiry timestamps
 - resolution and resolving device
 
-**JournalEvent**
+**JournalEvent** (internal to the bridge; network clients see only per-device authorized-view sequences)
 
-- monotonic sequence
+- monotonic internal sequence
 - event type
 - domain payload
 - creation time
@@ -455,14 +459,14 @@ Persist in Keychain:
 
 - device private key reference
 - paired host IDs and pinned public-key fingerprints
-- signed device grants
+- signed device grants (non-authoritative receipts; the Mac's stored authority decides)
 
 Persist as non-sensitive preferences:
 
 - selected host ID
 - agent-slot assignments by opaque thread ID
 - UI layout, haptics, voice, and accessibility preferences
-- last applied sequence per host
+- last sealed replay cursor envelope per host and device grant revision
 
 Keep in memory by default:
 
@@ -555,8 +559,8 @@ The bridge computes one display state per slot so every client is consistent:
 | iOS WebSocket | `URLSessionWebSocketTask` | Native, sufficient, background behavior is honest |
 | LAN discovery | Network.framework + Bonjour | Native service discovery and path monitoring |
 | Mac bridge | Swift executable + menu-bar SwiftUI shell | Shares protocol/domain code and integrates cleanly with Keychain and launch services |
-| Mac server | SwiftNIO + NIOWebSocket + NIOSSL | Mature server-side WSS, backpressure, and explicit transport control |
-| Cryptography | CryptoKit / swift-crypto | P-256 signing, SHA-256, HKDF, authenticated encryption if relay mode is added |
+| Mac server | NIO Transport Services 1.28.0 listener over Network.framework TLS with a Secure Enclave `SecIdentity`, plus swift-nio 2.101.3 (NIOHTTP1/NIOWebSocket) upgrade control and swift-certificates 1.19.4 | Accepted by the transport ADR: proven non-exportable identity, TLS 1.3-only policy, and exact upgrade/frame enforcement. NIOSSL is rejected — no public server ticket/resumption control under our policy |
+| Cryptography | CryptoKit / reviewed Apple Security APIs | P-256 signing/ECDH, SHA-256, HKDF, and mandatory ChaCha20-Poly1305 application-frame protection for Phase 2 LAN sessions |
 | Secure storage | iOS Secure Enclave/Keychain; macOS Keychain | Keeps device and host identity out of files and preferences |
 | Local persistence | None for content in v1; GRDB only if an offline cache is approved | Avoids unnecessary sensitive-data retention |
 | Schema/codegen | Codex JSON Schema fixtures + Swift Codable models | Detects app-server drift while keeping the phone protocol stable |
@@ -588,7 +592,7 @@ Codex-Micro/
 │   ├── CompanionDomain/           # Thread, turn, slot, approval state
 │   ├── CompanionCrypto/           # Key identities and challenge proofs
 │   ├── CodexAdapter/              # app-server process + JSON-RPC mapping
-│   ├── MacBridgeServer/           # WSS, auth, journal, policy
+│   ├── MacBridgeServer/           # TLS/WSS listener, sessions, limits only
 │   └── TestSupport/               # Fixtures, fake clocks, fake transports
 ├── Schemas/
 │   ├── codex/<supported-version>/ # Generated app-server schema snapshot
@@ -606,7 +610,7 @@ Codex-Micro/
 └── Package.swift                  # Shared packages; apps remain Xcode targets
 ```
 
-Start with fewer targets if Xcode maintenance becomes noisy. The architectural seams matter; speculative micro-packages do not.
+Start with fewer targets if Xcode maintenance becomes noisy. The architectural seams matter; speculative micro-packages do not. Ownership is fixed by the Phase 2 plan: `MacBridgeServer` owns the listener, TLS/WSS, connection/session actors, interface policy, and resource limits **only** — the event journal, device-grant authority, capability policy, and command gateway stay in `MacBridgeCore`.
 
 ## 13. Performance and reliability plan
 
@@ -621,14 +625,14 @@ Start with fewer targets if Xcode maintenance becomes noisy. The architectural s
 
 ### 13.2 Bounded resources
 
-- WebSocket message cap: define and enforce a conservative limit such as 1 MiB.
+- WebSocket bounds are fixed by ADR §9: binary frames only, 16 KiB frame cap, 64 KiB message cap, 8 fragments per message, and the connection/deadline/rate ceilings enforced in Step 2.7.
 - Inline text/diff cap: truncate with an explicit “Open full output on Mac” state.
-- Attachment downloads: short TTL, one device, one object, bounded size.
+- Attachment downloads (post-Phase 2): short TTL, one device, one object, bounded size.
 - Event journal: size- and time-bounded, for example last 10,000 normalized events or 24 hours.
-- Per-device command and pairing rate limits.
-- Slow consumers receive a fresh snapshot rather than unbounded queued deltas.
+- Per-source pairing/connection and per-connection message/byte rate limits per ADR §9.
+- Slow consumers receive a fresh filtered snapshot rather than unbounded queued deltas; the transport-layer queue bound in ADR §9 closes the connection when exceeded.
 
-Numbers above are starting limits, not claims of measured optimal values. Instrument them and adjust after physical-device testing.
+Transport constants come from the ADR and may only tighten without a superseding ADR; the application-level journal/truncation numbers are starting limits — instrument them and adjust after physical-device testing.
 
 ### 13.3 Observability
 
@@ -643,7 +647,7 @@ Track locally:
 - approval creation-to-resolution time,
 - memory high-water mark.
 
-Never record prompt text, response text, diffs, paths, command output, tokens, pairing secrets, or approval bodies in analytics. Diagnostics use opaque IDs and reason codes.
+Never record prompt text, response text, diffs, paths, command output, tokens, pairing secrets, or approval bodies in analytics. Diagnostics carry closed reason codes and numeric counts only — no opaque IDs, endpoints, or fingerprints.
 
 ## 14. Security model
 
@@ -671,7 +675,7 @@ Never record prompt text, response text, diffs, paths, command output, tokens, p
 | Terminal escape/control injection | Strip or safely parse ANSI/control sequences; render as native text, never HTML |
 | Secret leakage | Keep Codex auth on Mac; redact logs; no content in APNs; no Codex/account/long-lived credential in QR or URLs. The QR intentionally contains one short-lived single-use pairing bootstrap credential |
 | Resource exhaustion | Frame caps, rate limits, bounded journals, backpressure, output truncation |
-| Protocol downgrade | Pairing and connection signatures bind the negotiated version; enforce minimum supported major version |
+| Protocol downgrade | Pairing and connection signatures bind the exact negotiated minor/feature set; security/control messages never accept a bare minimum-major check |
 
 ### 14.3 Approval rules
 
@@ -742,7 +746,7 @@ Never record prompt text, response text, diffs, paths, command output, tokens, p
 **Exit gate**
 
 - A non-paired LAN client cannot read even thread metadata.
-- Replayed/expired pairing requests and replayed, reordered beyond policy, or altered frames in either direction are rejected.
+- Replayed/expired pairing requests are rejected. Frames must carry exactly the next per-direction counter; any duplicate, gap, wrong direction, overflow, cross-connection replay, alteration, or authentication failure closes the session.
 - TLS key rotation requires the paired host identity; host identity rotation requires re-pairing.
 - Revocation closes an active session immediately.
 - Network interruption resumes from a cursor or snapshot without state corruption.
@@ -771,7 +775,7 @@ Never record prompt text, response text, diffs, paths, command output, tokens, p
 - Full approval sheets for command, file, network, permission, and structured input.
 - Request digest binding and expiry.
 - Face ID/Touch ID for high-risk decisions.
-- Security tests, fuzzed decoder inputs, rate limits, log-redaction tests, and threat model.
+- Extend the P0 threat model, strict-decoder adversarial tests, rate limits, and log-redaction controls established before the Phase 2 listener; add approval-specific fuzzing and independent security review.
 
 **Exit gate**
 
@@ -868,7 +872,7 @@ Still to decide before the affected release phase:
 
 ## 18. Recommended immediate next step
 
-Complete Phase 1's Mac bridge core and security contracts before opening a listener or building polished iOS screens. Keep the phone protocol semantic, enforce the Mac-side capability ceiling independently, and treat the durable encrypted command ledger as a release gate rather than claiming exactly-once execution.
+Begin Phase 2 **Step 2.2**: strict wire contracts and the journal epoch in `CompanionProtocol`, under the accepted threat model and transport ADR. Keep the phone protocol semantic, enforce the Mac-side capability ceiling independently, and open no listener until the plan's dependency chain reaches Step 2.7 with the ADR's exact pins and constants.
 
 ## 19. Official references
 

@@ -13,7 +13,7 @@ The first distribution and platform assumptions are provisional: personal/TestFl
 ## Implemented in this increment
 
 - Shared `CompanionProtocol` Swift target usable by iOS and macOS.
-- Protocol version with major-version compatibility checks.
+- Protocol version with major-version compatibility checks. This major-only check is an internal Phase 1 convenience; it is insufficient for Phase 2 network security messages, which require the exact minor/feature negotiation defined by the Phase 2 plan and transport ADR.
 - Versioned generic companion envelope.
 - Semantic command allowlist:
   - select thread,
@@ -28,7 +28,7 @@ The first distribution and platform assumptions are provisional: personal/TestFl
 - Boundary validation for opaque IDs, prompt size/content, attachment count, and approval digests.
 - One-minute command age window with limited future clock skew.
 - Device capabilities, project allowlists, revocation, and least-permissive mobile-profile intersection.
-- In-memory bounded event journal with monotonic sequences, cursor replay, stale-cursor snapshot fallback, and ahead-cursor rejection.
+- In-memory bounded event journal with monotonic sequences, cursor replay, stale-cursor snapshot fallback, and ahead-cursor rejection. These sequences are an internal-only global namespace; Phase 2 never exposes them to the network and instead assigns per-device authorized-view sequences with the sealed replay cursor envelope.
 - Agent-slot state derivation with `inputRequired` precedence.
 - Exact Codex compatibility gate for CLI `0.146.0`:
   - one resolved absolute executable is used for both verification and launch,
@@ -112,7 +112,8 @@ Swift format lint: passed
 Live compatibility probe: Codex CLI 0.146.0 and canonical schema digest supported
 Third-party runtime dependencies added: none
 Network listener added: no
-Credentials or secrets stored: no
+User/provider credentials stored: no
+Generated device-only secrets stored: one Keychain ledger encryption key
 ```
 
 ## Security properties currently enforced
@@ -148,8 +149,8 @@ The four Phase 1 exit gates from the architecture plan are met, re-verified on 2
 ## Deferred beyond Phase 1
 
 - App-bundle packaging, signing, and notarization of the menu-bar shell — release-phase work; the SwiftPM `codex-micro-bridge` executable already wires the full production lifecycle.
-- Live-probe verification that installed Codex emits `serverRequest/resolved` for bridge-resolved approvals — must run before Phase 2 exposes phone-originated approvals; the reconciliation contract is proven against the fake app-server only.
-- Device-bound phone user-presence assertions — Phase 2 authenticated pairing/session work; a boolean claimed by the phone is not sufficient.
-- Simulator and physical-device integration — Phase 3, once the first iOS app target exists; the shared protocol already passes a generic iOS device build.
+- Live-probe verification that installed Codex emits `serverRequest/resolved` for bridge-resolved approvals — belongs before or within **Phase 4**, which owns phone-originated approvals; Phase 2 rejects `resolveApproval` throughout, so this probe is not a Phase 2 prerequisite. The reconciliation contract is proven against the fake app-server only.
+- Device-bound phone user-presence assertions — **Phase 4** approval-hardening work, not Phase 2; a boolean claimed by the phone is not sufficient.
+- Simulator and physical-device integration — the minimal signed iOS **acceptance host** arrives at Phase 2 Step 2.14 solely to prove identity/pairing/transport acceptance; the product iOS UI and its device integration remain Phase 3. The shared protocol already passes a generic iOS device build.
 
 Networking, pairing, Bonjour, WSS, and the iOS interface remain Phase 2 and Phase 3 work. They are intentionally not part of this increment.
