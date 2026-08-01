@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+DerivedData/
+*.log
+*.cer
+*.der
+*.key
+*.p12
+*.mobileprovision
