@@ -14,6 +14,7 @@ public enum CanonicalStatementVersion {
 /// never verify or reproduce under another. Every context string carries its
 /// own version suffix; a future layout change mints a new context.
 public enum CanonicalStatementDomain: String, CaseIterable, Sendable {
+  case pairingQRPayload = "codex-micro/pairing-qr/v1"
   case pairingTranscript = "codex-micro/pairing-transcript/v1"
   case sessionTranscript = "codex-micro/session-transcript/v1"
   case rotationStatement = "codex-micro/rotation-statement/v1"
@@ -130,6 +131,40 @@ struct CanonicalStatementReader {
       throw SecureWireValidationError.invalidField(name: "canonicalFieldLength")
     }
     return data
+  }
+
+  mutating func readText() throws -> String {
+    guard let text = String(data: try readVariableBytes(), encoding: .utf8) else {
+      throw SecureWireValidationError.invalidField(name: "canonicalText")
+    }
+    return text
+  }
+
+  mutating func readUUID() throws -> UUID {
+    UUID(canonicalBytes: try readVariableBytes(exactCount: 16))
+  }
+
+  /// Reads an exact protocol selection. Unknown, duplicate, or non-ascending
+  /// feature identifiers fail closed, so one selection has one encoding.
+  mutating func readSelection() throws -> SecureProtocolSelection {
+    let major = try readUInt16()
+    let minor = try readUInt16()
+    let count = Int(try readUInt16())
+    guard (1...SecureTransportLimits.maxFeatureCount).contains(count) else {
+      throw SecureWireValidationError.invalidField(name: "features")
+    }
+    var features: [SecureProtocolFeature] = []
+    features.reserveCapacity(count)
+    for _ in 0..<count {
+      guard let feature = SecureProtocolFeature(rawValue: try readText()) else {
+        throw SecureWireValidationError.invalidField(name: "features")
+      }
+      if let previous = features.last, previous.rawValue >= feature.rawValue {
+        throw SecureWireValidationError.invalidField(name: "features")
+      }
+      features.append(feature)
+    }
+    return try SecureProtocolSelection(major: major, minor: minor, features: Set(features))
   }
 
   func requireEnd() throws {
