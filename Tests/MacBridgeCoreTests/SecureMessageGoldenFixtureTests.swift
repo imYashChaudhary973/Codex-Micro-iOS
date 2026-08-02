@@ -13,6 +13,9 @@ extension SecureFixtures {
   static let pairingResponseJSON =
     #"{"hostID":"22222222-2222-2222-2222-222222222222","hostNonce":"REREREREREREREREREREREREREREREREREREREREREQ=","hostPublicKey":"VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=","pairingSessionID":"11111111-1111-1111-1111-111111111111","selection":{"features":["observe-sync-v1","thread-read-cursor-v1","turn-interrupt-v1"],"major":1,"minor":1},"transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
 
+  static let pairingConfirmationJSON =
+    #"{"deviceID":"33333333-3333-3333-3333-333333333333","pairingSessionID":"11111111-1111-1111-1111-111111111111","transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
+
   static let authRequestJSON =
     #"{"deviceEphemeralPublicKey":"MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=","deviceID":"33333333-3333-3333-3333-333333333333","deviceNonce":"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=","selection":{"features":["observe-sync-v1","thread-read-cursor-v1","turn-interrupt-v1"],"major":1,"minor":1},"transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
 
@@ -78,6 +81,15 @@ final class SecureMessageGoldenFixtureTests: XCTestCase {
       transcriptSignature: Data(repeating: 0x66, count: 64)
     )
     try assertGolden(message, matches: SecureFixtures.pairingResponseJSON)
+  }
+
+  func testPairingConfirmationGoldenFixture() throws {
+    let message = try SecurePairingConfirmation(
+      pairingSessionID: SecureFixtures.pairingSessionID,
+      deviceID: SecureFixtures.deviceID,
+      transcriptSignature: Data(repeating: 0x66, count: 64)
+    )
+    try assertGolden(message, matches: SecureFixtures.pairingConfirmationJSON)
   }
 
   func testSessionAuthRequestGoldenFixture() throws {

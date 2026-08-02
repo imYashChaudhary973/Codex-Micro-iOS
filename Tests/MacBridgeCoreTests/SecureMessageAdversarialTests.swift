@@ -114,6 +114,75 @@ final class SecureMessageAdversarialTests: XCTestCase {
     )
   }
 
+  func testPairingConfirmationUnknownFieldFailsClosed() {
+    assertRejects(
+      SecurePairingConfirmation.self,
+      mutated(
+        SecureFixtures.pairingConfirmationJSON,
+        #""deviceID":"#,
+        #""confirmedByPeer":true,"deviceID":"#
+      )
+    )
+    assertRejects(
+      SecurePairingConfirmation.self,
+      mutated(
+        SecureFixtures.pairingConfirmationJSON,
+        #""deviceID":"#,
+        #""capabilities":["runAgent"],"deviceID":"#
+      )
+    )
+  }
+
+  func testPairingConfirmationWrongSignatureLengthFailsClosed() {
+    for count in [63, 65, 0] {
+      assertRejects(
+        SecurePairingConfirmation.self,
+        mutated(
+          SecureFixtures.pairingConfirmationJSON,
+          "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg==",
+          Data(repeating: 0x66, count: count).base64EncodedString()
+        )
+      )
+    }
+    XCTAssertThrowsError(
+      try SecurePairingConfirmation(
+        pairingSessionID: SecureFixtures.pairingSessionID,
+        deviceID: SecureFixtures.deviceID,
+        transcriptSignature: Data(repeating: 0x66, count: 96)
+      )
+    ) { error in
+      XCTAssertEqual(
+        error as? SecureWireValidationError, .invalidField(name: "transcriptSignature"))
+    }
+  }
+
+  func testPairingConfirmationWrongTypesAndMissingFieldsFailClosed() {
+    assertRejects(
+      SecurePairingConfirmation.self,
+      mutated(
+        SecureFixtures.pairingConfirmationJSON,
+        #""deviceID":"33333333-3333-3333-3333-333333333333""#,
+        #""deviceID":33333333"#
+      )
+    )
+    assertRejects(
+      SecurePairingConfirmation.self,
+      mutated(
+        SecureFixtures.pairingConfirmationJSON,
+        #""deviceID":"33333333-3333-3333-3333-333333333333","#,
+        ""
+      )
+    )
+    assertRejects(
+      SecurePairingConfirmation.self,
+      mutated(
+        SecureFixtures.pairingConfirmationJSON,
+        #""pairingSessionID":"11111111-1111-1111-1111-111111111111""#,
+        #""pairingSessionID":"not-a-uuid""#
+      )
+    )
+  }
+
   // MARK: - Session authentication messages
 
   func testAuthRequestUnknownFieldFailsClosed() {

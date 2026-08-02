@@ -25,6 +25,7 @@ final class CanonicalEncodingGoldenVectorTests: XCTestCase {
 
   func testEveryStatementLeadsWithVersionAndDomain() throws {
     let cases: [(CanonicalStatementDomain, Data)] = [
+      (.pairingQRPayload, try PairingFixtures.qrPayload().canonicalEncoding()),
       (.pairingTranscript, try CryptoFixtures.pairingTranscript().canonicalEncoding()),
       (.sessionTranscript, try CryptoFixtures.sessionTranscript().canonicalEncoding()),
       (.rotationStatement, try CryptoFixtures.rotationStatement().canonicalEncoding()),
@@ -41,7 +42,7 @@ final class CanonicalEncodingGoldenVectorTests: XCTestCase {
   func testDomainSeparatorsAreDistinctASCII() {
     let domains = CanonicalStatementDomain.allCases.map(\.rawValue)
     XCTAssertEqual(Set(domains).count, domains.count)
-    XCTAssertEqual(domains.count, 6)
+    XCTAssertEqual(domains.count, 7)
     for domain in domains {
       XCTAssertTrue(domain.allSatisfy(\.isASCII))
       XCTAssertTrue(domain.hasSuffix("/v1"))

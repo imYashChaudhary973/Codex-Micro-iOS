@@ -91,6 +91,16 @@ public struct PairingTranscript: Equatable, Sendable {
   }
 }
 
+extension PairingTranscript: CustomStringConvertible, CustomDebugStringConvertible,
+  CustomReflectable
+{
+  /// Redacted: the transcript binds the single-use bootstrap secret, so no
+  /// description, interpolation, or reflection path may render its fields.
+  public var description: String { "PairingTranscript(redacted)" }
+  public var debugDescription: String { description }
+  public var customMirror: Mirror { Mirror(self, children: []) }
+}
+
 /// Canonical session-authentication transcript (ADR §11) binding the session
 /// ID, authenticated device, exact negotiated protocol tuple, both ephemeral
 /// ECDH contributions and nonces, and the Mac-stored authority counters.

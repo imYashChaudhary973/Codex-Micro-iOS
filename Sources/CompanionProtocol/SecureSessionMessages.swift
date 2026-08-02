@@ -124,6 +124,48 @@ public struct SecurePairingResponse: Codable, Equatable, Sendable {
   }
 }
 
+/// Third and final pairing message, sent by the device after it verified the
+/// host's transcript signature, derived the verification phrase, and received
+/// its own local user confirmation.
+///
+/// It completes the mutual signing the pairing pair deliberately deferred:
+/// the device signs exactly the same canonical pairing transcript the host
+/// signed in ``SecurePairingResponse``. The device ID is a non-secret,
+/// device-asserted identifier (threat model §3.3) — it is never proof of
+/// identity, and uniqueness is decided by the Mac's grant authority.
+public struct SecurePairingConfirmation: Codable, Equatable, Sendable {
+  public let pairingSessionID: UUID
+  public let deviceID: UUID
+  public let transcriptSignature: Data
+
+  public init(
+    pairingSessionID: UUID,
+    deviceID: UUID,
+    transcriptSignature: Data
+  ) throws {
+    try requireExactByteCount(
+      transcriptSignature, SecureTransportLimits.signatureByteCount, field: "transcriptSignature")
+    self.pairingSessionID = pairingSessionID
+    self.deviceID = deviceID
+    self.transcriptSignature = transcriptSignature
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try strictContainer(from: decoder, keyedBy: CodingKeys.self)
+    try self.init(
+      pairingSessionID: container.decode(UUID.self, forKey: .pairingSessionID),
+      deviceID: container.decode(UUID.self, forKey: .deviceID),
+      transcriptSignature: container.decode(Data.self, forKey: .transcriptSignature)
+    )
+  }
+
+  private enum CodingKeys: String, CodingKey, CaseIterable {
+    case pairingSessionID
+    case deviceID
+    case transcriptSignature
+  }
+}
+
 /// Session authentication request from a previously paired device.
 public struct SecureSessionAuthRequest: Codable, Equatable, Sendable {
   public let deviceID: UUID
