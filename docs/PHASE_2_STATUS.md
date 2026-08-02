@@ -1,12 +1,12 @@
 # Phase 2 — Secure Local Pairing and Networking Status
 
-**Status:** Step 2.3 implemented (pending review/merge) — Step 2.4a (host/TLS identities) is next
+**Status:** Step 2.4a implemented (pending review/merge) — Step 2.4b (device-grant authority) is next
 
 **Snapshot:** 2026-08-02
 
 ## Current objective
 
-Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. Step 2.2 then delivered the strict secure-session wire contracts and the journal-epoch replay cursor in `CompanionProtocol` as pure data types. Step 2.3 added the `CompanionCrypto` target: the canonical statement encoding contract, P-256/ECDH/HKDF/AEAD primitives, SPKI fingerprints, SAS derivation, and rotation-statement verification, all pinned by golden vectors. The next work is **Step 2.4a only**: Mac host/TLS Secure Enclave identity adapters and certificate lifecycle under the ADR's exact dependency pins.
+Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. Step 2.2 then delivered the strict secure-session wire contracts and the journal-epoch replay cursor in `CompanionProtocol` as pure data types. Step 2.3 added the `CompanionCrypto` target: the canonical statement encoding contract, P-256/ECDH/HKDF/AEAD primitives, SPKI fingerprints, SAS derivation, and rotation-statement verification, all pinned by golden vectors. Step 2.4a added the `MacBridgeServer` target with the Mac host/TLS Secure Enclave identity adapters, the content-neutral certificate lifecycle, and anti-rollback TLS rotation state under the ADR's exact dependency pins. The next work is **Step 2.4b only**: the authoritative device-grant store per ADR §10.
 
 The accepted implementation order is defined in [the Phase 2 plan](PHASE_2_PLAN.md). This status document records evidence and limitations incrementally; it never treats source-only, loopback, generic-device, simulator, or Mac-only evidence as physical-iPhone proof.
 
@@ -130,27 +130,63 @@ The plan fixes the SAS as six words from a fixed versioned 2,048-word list. Step
 - Rotation verification is a pure function; anti-rollback persistence of accepted generations and delivery wire messages are Step 2.4a scope.
 - Source-only evidence: no loopback, simulator, generic-device, or physical-device claims. The generic iOS device build of `CompanionProtocol`/`CompanionCrypto` was not run in this environment and remains required merge evidence.
 
+## Step 2.4a outcome — host/TLS Secure Enclave identities and certificate lifecycle
+
+### Dependency adoption (ADR §4 pins)
+
+The root package adopted its first Phase 2 production dependency, exactly as pinned by the ADR:
+
+```text
+swift-certificates 1.19.4 (direct; revision 449dbbecd0f31e82b510ada227ca152caa8b5e98)
+swift-crypto       4.5.1  (transitive; revision 47d3869a7291f085c1fb9fb1e6d3b97a793f45c6)
+swift-asn1         1.7.1  (transitive; revision a9a5efd40eaf558a2bcd48d64b1d1646be686008)
+```
+
+The resolved revisions are byte-identical to the merged spike's `Package.resolved`, so the ADR §4 feasibility rows remain valid — no pin or toolchain changed. `swift-nio` and `swift-nio-transport-services` are **not** declared; their adoption point is Step 2.7.
+
+### Implemented scope (new `MacBridgeServer` target)
+
+- **Target:** new `MacBridgeServer` library plus `MacBridgeServerTests` in the root package, depending on `CompanionProtocol`, `CompanionCrypto`, and `X509`, linking the Security framework. It contains no socket, listener, Bonjour, pairing, grant, executor, or logging code.
+- **Identity adapters (ADR §6):** `BridgeIdentityStore` implements the proven spike lifecycle for roles `.host` and `.tls` against a `SecureIdentityBackend` seam — atomic claim-before-creation with verified post-create state and rollback of both key and claim on any failure; strict retrieval validating claim/key cardinality, the non-exportable attribute profile, the expected SPKI fingerprint (constant-time), and the export-denial assertion in fixed order; closed content-free error vocabulary throughout. `loadOrCreate` distinguishes fresh creation from existing state and never replaces an identity: an expected-but-missing identity surfaces `identityLost` (LAN-disable), and destruction happens only through `reset`, gated by an injected "no grants exist" policy callback with verified cleanup.
+- **Production backend:** `SecureEnclaveIdentityBackend` reproduces the spike's proven pattern in the production namespace — Secure Enclave P-256 (`kSecAttrTokenIDSecureEnclave`), `privateKeyUsage`-only access control, `AfterFirstUnlockThisDeviceOnly`, `kSecUseDataProtectionKeychain`, ThisDeviceOnly semantics, no software fallback. OSStatus values never leave the backend; failures map to the closed vocabulary.
+- **Certificate lifecycle (ADR §7):** `BridgeCertificateFactory` issues content-neutral self-signed certificates from the `.tls` identity via swift-certificates, signing through the backend (production `SecKey`; test CryptoKit): fixed static subject/SAN, ECDSA P-256/SHA-256, critical `digitalSignature` key usage, `serverAuth` EKU, critical not-a-CA constraint, random serial, exactly 30-day validity from an injected clock. Same-key renewal preserves the pinned SPKI and fails closed on any mismatch; `isRenewalDue` implements the two-thirds-lifetime rule. `BridgeTLSIdentityAssembly` assembles the `SecCertificate`/`SecIdentity` pair for the Step 2.7 listener and requires the Keychain-backed key.
+- **Rotation state (ADR §7/§11):** `TLSRotationAuthority` owns the persisted anti-rollback record — rotation generation plus current/previous SPKI fingerprints — as a small versioned canonical blob behind an injectable storage seam; the production `FileBackedRotationStateStore` lives under Application Support with a `0700` directory, `0600` file, atomic replacement, and backup exclusion. The authority produces host-signed rotation statements (reusing `SecureRotationStatement`/`SecureRotationVerifier` from `CompanionCrypto`, `.host` role enforced) and applies them with strict generation monotonicity, persisting the accepted generation before it becomes visible; rollback, replay, pin mismatch, bad signatures, out-of-window statements, corrupt/truncated state, and generation overflow all fail closed, and identity-continuity mismatch surfaces a closed `identityLost` state that callers must treat as LAN-disable.
+
+### Step 2.4a verification
+
+- 77 new deterministic tests in `MacBridgeServerTests` (root suite total 315), all through injected fakes (software CryptoKit keys and an in-memory item store behind the production seams): creation/load round trips and 64-byte raw-signature checks; duplicate claim, orphan claim, unclaimed key, incomplete creation; rollback on exportable/wrong-attribute/multiplicity post-create failures including rollback-failure surfacing; wrong/missing/corrupt/multiplicity/lookup-error retrieval; SPKI mismatch ordering; `loadOrCreate` created/existing distinction, identity-loss on expected-but-missing, and no-replacement over corrupt or mismatched state; reset refusal while grants exist (and on policy failure) plus verified-cleanup failure; certificate profile golden checks, 30-day validity from the injected clock, SPKI-to-identity binding, wrong-role rejection, renewal SPKI continuity, different-key rejection, new-key SPKI change, renewal-due boundary logic, and `SecCertificate` assembly round trip; rotation baseline/once-only initialization, statement production binding, valid apply, tampered-signature/wrong-key/wrong-pin/stale-generation/expired/not-yet-valid/replay rejection, anti-rollback persistence across store reopen, write-failure atomicity, corrupt/truncated/oversized state failing closed at open, generation-overflow refusal, and identity-continuity checks; blob-codec round trips with every-byte truncation, trailing bytes, wrong version/domain, and file-store permission/backup-exclusion assertions.
+
+### Honest limitations
+
+- **Secure Enclave/Data Protection Keychain positive paths run only in entitled contexts.** The unit suite exercises the production lifecycle logic exclusively through injected fakes; `SecureEnclaveIdentityBackend` compiles and mirrors the spike's proven pattern, but no test in this environment created, retrieved, or destroyed a real Secure Enclave key. The entitled positive proof exists as the merged spike evidence (`a445f81`/`c6577b7`, re-run signed-Mac) and is re-proven on-device at Step 2.14.
+- **No listener and no served certificate.** Nothing binds a socket, advertises Bonjour, opens a pairing endpoint, or presents the generated certificate over TLS; the `SecIdentity` assembly is consumed first by the Step 2.7 listener. Rotation-statement delivery over an authenticated session is Step 2.6+ scope — this step only produces, verifies, and persists them.
+- **No grant authority.** The reset gate takes an injected policy callback; the authoritative "no grants exist" answer arrives with the Step 2.4b grant store.
+- Source-only evidence: no loopback, simulator, generic-device, or physical-device claims. The generic iOS device build of `CompanionProtocol`/`CompanionCrypto` (and the `MacBridgeServer` cross-platform declaration) was not run in this environment and remains required merge evidence.
+
 ## Current verification evidence
 
 ```text
-Root swift test: 238 passed, 0 failed
-  (MacBridgeCoreTests 127, CompanionCryptoTests 93, CodexAppServerTests 18)
+Root swift test: 315 passed, 0 failed
+  (MacBridgeCoreTests 127, CompanionCryptoTests 93, MacBridgeServerTests 77,
+   CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
 Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run since
 Phase 2 production listener added: no
-Phase 2 production dependencies added: no (CompanionCrypto links only system CryptoKit/Foundation)
+Phase 2 production dependencies added: yes — exactly the ADR §4 Step 2.4a pins
+  (swift-certificates 1.19.4 direct; swift-crypto 4.5.1 + swift-asn1 1.7.1 transitive)
 Production pairing endpoint or Bonjour added: no
 Network command path added: no
-Keychain, Secure Enclave, or key-storage code added: no
+Keychain, Secure Enclave, or key-storage code added: yes — MacBridgeServer identity
+  adapters and rotation state only; entitled positive paths not exercised by unit tests
 ```
 
-The production negatives above are explicit: no production target gained a listener, external dependency, Bonjour advertisement, pairing endpoint, command path, or key storage in Steps 2.1–2.3. `CompanionCrypto` is pure computation over caller-supplied material. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
+The remaining production negatives are explicit: no production target gained a listener, Bonjour advertisement, pairing endpoint, or command path in Steps 2.1–2.4a. `CompanionCrypto` is pure computation over caller-supplied material, and `MacBridgeServer` holds identity/certificate/rotation lifecycle only. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
 
-## Deferred beyond Steps 2.1–2.3
+## Deferred beyond Steps 2.1–2.4a
 
-- Any production code or dependency implementing identity storage, grant authority, pairing/session state machines, listener, WebSocket, Bonjour, revocation, or command transport — these begin at Step 2.4a in plan order, adopting the ADR's exact pins at Steps 2.4a/2.7. Step 2.3 added only pure cryptographic primitives and canonical encodings to the new `CompanionCrypto` target.
+- Any production code or dependency implementing grant authority, pairing/session state machines, listener, WebSocket, Bonjour, revocation, or command transport — these continue at Step 2.4b in plan order, with the remaining ADR pins (`swift-nio`, `swift-nio-transport-services`) adopted at Step 2.7. Step 2.4a added only identity, certificate, and rotation lifecycle to the new `MacBridgeServer` target under the swift-certificates pin.
 - The spike's deferred implementation gaps (rate limiting, slow-consumer policy, idle expiry, ping/pong deadlines, live `NWInterface` pinning, lifecycle-generation integration, `NWListener.service` physical re-verification, app-level connection caps, registry-based teardown) — owned by named steps in ADR §16.
 - Phone approval execution or approval assertion types — rejected throughout Phase 2; Phase 4 scope.
 - Physical-device claims — only at the post-provisional Phase 2 acceptance gate (Step 2.14).
