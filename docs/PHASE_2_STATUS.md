@@ -1,12 +1,12 @@
 # Phase 2 — Secure Local Pairing and Networking Status
 
-**Status:** Step 2.4a implemented (pending review/merge) — Step 2.4b (device-grant authority) is next
+**Status:** Step 2.4b implemented (pending review/merge) — Step 2.5 (pairing state machine) is next
 
 **Snapshot:** 2026-08-02
 
 ## Current objective
 
-Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. Step 2.2 then delivered the strict secure-session wire contracts and the journal-epoch replay cursor in `CompanionProtocol` as pure data types. Step 2.3 added the `CompanionCrypto` target: the canonical statement encoding contract, P-256/ECDH/HKDF/AEAD primitives, SPKI fingerprints, SAS derivation, and rotation-statement verification, all pinned by golden vectors. Step 2.4a added the `MacBridgeServer` target with the Mac host/TLS Secure Enclave identity adapters, the content-neutral certificate lifecycle, and anti-rollback TLS rotation state under the ADR's exact dependency pins. The next work is **Step 2.4b only**: the authoritative device-grant store per ADR §10.
+Step 2.1 resolved the Phase 2 trust model and every transport/TLS decision before any production session protocol types, cryptography targets, dependencies, listeners, discovery, pairing endpoints, or network command paths are added. Step 2.2 then delivered the strict secure-session wire contracts and the journal-epoch replay cursor in `CompanionProtocol` as pure data types. Step 2.3 added the `CompanionCrypto` target: the canonical statement encoding contract, P-256/ECDH/HKDF/AEAD primitives, SPKI fingerprints, SAS derivation, and rotation-statement verification, all pinned by golden vectors. Step 2.4a added the `MacBridgeServer` target with the Mac host/TLS Secure Enclave identity adapters, the content-neutral certificate lifecycle, and anti-rollback TLS rotation state under the ADR's exact dependency pins. Step 2.4b now adds the Mac-authoritative device-grant records, single bounded Keychain blob, anti-rollback authority sequence, persist-before-visible actor, permanent revocation/expiry tombstones, device-scoped access, and bridge to the existing Phase 1 capability policy. The next work is **Step 2.5 only**: the transport-independent pairing state machine that creates a new grant after completed dual confirmation.
 
 The accepted implementation order is defined in [the Phase 2 plan](PHASE_2_PLAN.md). This status document records evidence and limitations incrementally; it never treats source-only, loopback, generic-device, simulator, or Mac-only evidence as physical-iPhone proof.
 
@@ -163,11 +163,39 @@ The resolved revisions are byte-identical to the merged spike's `Package.resolve
 - **No grant authority.** The reset gate takes an injected policy callback; the authoritative "no grants exist" answer arrives with the Step 2.4b grant store.
 - Source-only evidence: no loopback, simulator, generic-device, or physical-device claims. The generic iOS device build of `CompanionProtocol`/`CompanionCrypto` (and the `MacBridgeServer` cross-platform declaration) was not run in this environment and remains required merge evidence.
 
+## Step 2.4b outcome — Mac-authoritative device-grant authority
+
+### Implemented scope (production `MacBridgeCore`)
+
+- **Authoritative records:** `AuthoritativeDeviceGrant` stores the opaque UUID device ID, strictly validated 65-byte uncompressed/on-curve P-256 X9.63 public key, display-neutral `UInt64` created/last-seen epoch seconds, the existing `DeviceCapability` set, bounded opaque project allowlist in canonical NFC bytes (empty by default), existing `MobileActionProfile` ceiling, per-device grant revision and authorized-view epoch (both starting at 1), optional epoch-seconds expiry, and a permanent typed revocation/expiry tombstone. Tombstoned IDs can never be granted again; a new pairing must create a new device ID. Host generation and the anti-rollback authority write sequence are `UInt64` and never wrap.
+- **Canonical bounded blob:** `GrantAuthorityBlobCodec` encodes one version-1, domain-separated `codex-micro/device-grant-authority/v1` blob with fixed-width big-endian counters, `UInt16` length prefixes, explicit optional-presence bytes, byte-canonical ordering of device records/capabilities/projects, and strict rejection of trailing bytes, duplicate/non-canonical device or set entries, unknown closed-vocabulary values, malformed keys/timestamps/counters, truncation, foreign version/domain, and blobs over 64 KiB. Encode validates every count/variable length before conversion and enforces the 64 KiB ceiling incrementally, so no narrowing conversion can trap or truncate.
+- **Synchronous storage seam:** `GrantAuthorityStorage` is explicitly synchronous, `Sendable`, and thread-safe because `DeviceGrantAuthority` loads during actor initialization. It distinguishes one explicit zero-byte fresh-install marker from a missing item; missing, duplicate, corrupt, oversized, rollback, or store failure is a LAN-disable condition. `DataProtectionKeychainGrantStore` uses one fixed generic-password service/account, `kSecUseDataProtectionKeychain`, `AfterFirstUnlockThisDeviceOnly`, non-synchronizable ThisDeviceOnly semantics, and whole-item `SecItemAdd`/`SecItemUpdate`. The duplicate path verifies exact cardinality *and* protection attributes before update and exact persisted bytes afterward, and the update predicate retains those attributes so a replacement race cannot redirect the write to a weaker item; a nonempty write may never recreate a deleted item, which surfaces authority loss instead of silently restoring continuity. No file store or separate encryption key exists.
+- **Single authority actor:** `DeviceGrantAuthority` is the sole API for session authentication and command authorization. It loads at initialization, exposes a closed availability state, accepts pairing output through `addGrant`, and owns revoke, explicit expiry, strict project-scope reduction, capability/profile amendment, last-seen touch, host-generation advance, reload, and current-grant lookup. Every mutation increments the authority sequence and persists the complete canonical blob before publishing new in-memory state. A persistence failure leaves the prior state unpublished, latches the authority unavailable, and denies every later call until successful reload; sequence rollback or same-sequence state substitution is rejected against the in-memory high-water mark.
+- **Version rules:** every grant mutation advances the device revision; project-scope reduction and revocation/expiry also advance the authorized-view epoch. Capability/profile amendment advances revision and advances view epoch exactly when `.view` membership changes. Last-seen changes advance only the authority sequence. Host generation changes only through explicit global invalidation. Overflow of revision, view epoch, host generation, or authority sequence latches the authority closed instead of wrapping.
+- **Expiry contract:** clock-checked lookups deny at and after `expiresAt` immediately. `expire(deviceID:)` is the only persisted expiry-tombstone transition and has the same revision/view-epoch semantics as revocation while preserving a distinct closed reason. The active-session expiry scheduler added with session/observe integration must call this API before closing affected sessions; this step intentionally creates no wall-clock sleeping task and makes no active-session claim.
+- **Phase 1 policy bridge and isolation:** `effectivePolicyGrant` derives the existing `DeviceGrant` so all command decisions continue through `CapabilityPolicy.authorize`; no policy logic is duplicated. Authenticated session code receives a `DeviceGrantHandle` bound to one device ID and exposing no device-ID parameter, so that handle cannot read or touch another device. The only bulk snapshot is explicitly named/documented for Mac administration and includes tombstones.
+- **No new target, dependency, package, socket, listener, Bonjour, pairing endpoint, command path, or free-form logging** was added. `MacBridgeCore` remains the sole owner of device-grant authority.
+
+### Step 2.4b verification
+
+- 42 new deterministic `MacBridgeCoreTests` (root suite total 357): 12 canonical-codec/record/store-semantics tests, 24 actor/policy/version/failure tests, and 6 concurrency/storage tests.
+- Byte-exact 232-byte golden authority fixture plus decode/re-encode round trip; deterministic device/capability/project ordering; every-byte truncation; wrong version/domain; patched length; trailing bytes; duplicate device IDs; zero generation/sequence; oversize; malformed/compressed-tag/off-curve public keys and invalid timestamps.
+- Fresh-install explicit-empty versus missing/corrupt/duplicate/store-failure initialization; add/reopen; secure defaults; revoke/expire/scope/capability/touch/host-generation version rules; passive-expiry boundary and explicit persisted expiry; tombstone permanence; Phase 1 policy derivation; cross-device handle isolation; sequence rollback, same-sequence substitution, missing-after-persist, bounded-encode rejection, and specific storage-failure latching/recovery.
+- Persist-before-visible failure tests prove a failed revoke never publishes its tombstone and all subsequent mutations are denied until reload. Actor concurrency tests cover concurrent different/same-device grants, revoke-versus-lookup serialized outcomes, failed concurrent revoke with no revoked-but-unpersisted observation, 20 concurrent last-seen mutations without lost writes, and synchronous thread-safe fake-store access. Separate tests force `UInt64.max` at revision, view epoch, host generation, and authority sequence and assert fail-closed latching.
+
+### Honest limitations
+
+- **The production Data Protection Keychain path is compiled but not positively exercised in this unentitled unit-test context.** Deterministic tests run against the locked in-memory seam; entitled Mac/app contexts must prove explicit fresh-install-marker provisioning, add/update/load, accessibility across lock/reboot, duplicate behavior, and deletion/loss behavior. No test claims real Keychain persistence.
+- **Pairing does not create grants yet.** Step 2.5 owns the claim/verification/SAS/dual-confirmation choreography and calls `addGrant` only after successful pairing, creating a new device ID. The explicit first-install marker also still needs production assembly/provisioning; a missing item is intentionally never treated as a fresh install.
+- **No network/session integration yet.** Steps 2.6–2.8 bind authenticated sessions to `DeviceGrantHandle`, schedule active expiry, purge unauthorized queued output/results, and close or reauthenticate affected connections after the already-linearized authority commit. This step proves the authority substrate only.
+- The Step 2.4a host-identity reset callback is not yet wired to this actor's administrative snapshot; production assembly does that before LAN enablement.
+- Source-only evidence: no listener, loopback, simulator, generic-device, or physical-device claim is made by Step 2.4b.
+
 ## Current verification evidence
 
 ```text
-Root swift test: 315 passed, 0 failed
-  (MacBridgeCoreTests 127, CompanionCryptoTests 93, MacBridgeServerTests 77,
+Root swift test: 357 passed, 0 failed
+  (MacBridgeCoreTests 169, CompanionCryptoTests 93, MacBridgeServerTests 77,
    CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
@@ -179,14 +207,15 @@ Phase 2 production dependencies added: yes — exactly the ADR §4 Step 2.4a pin
 Production pairing endpoint or Bonjour added: no
 Network command path added: no
 Keychain, Secure Enclave, or key-storage code added: yes — MacBridgeServer identity
-  adapters and rotation state only; entitled positive paths not exercised by unit tests
+  adapters plus the MacBridgeCore grant-authority Data Protection Keychain blob store;
+  entitled positive paths are not exercised by unit tests
 ```
 
-The remaining production negatives are explicit: no production target gained a listener, Bonjour advertisement, pairing endpoint, or command path in Steps 2.1–2.4a. `CompanionCrypto` is pure computation over caller-supplied material, and `MacBridgeServer` holds identity/certificate/rotation lifecycle only. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
+The remaining production negatives are explicit: no production target gained a listener, Bonjour advertisement, pairing endpoint, or command path in Steps 2.1–2.4b. `CompanionCrypto` remains pure computation over caller-supplied material; `MacBridgeServer` holds identity/certificate/rotation lifecycle; and `MacBridgeCore` now holds only local grant-authority records/storage/authorization access, with no socket reachability. The spike package is isolated evidence with its own pinned dependencies and is not part of the production build.
 
-## Deferred beyond Steps 2.1–2.4a
+## Deferred beyond Steps 2.1–2.4b
 
-- Any production code or dependency implementing grant authority, pairing/session state machines, listener, WebSocket, Bonjour, revocation, or command transport — these continue at Step 2.4b in plan order, with the remaining ADR pins (`swift-nio`, `swift-nio-transport-services`) adopted at Step 2.7. Step 2.4a added only identity, certificate, and rotation lifecycle to the new `MacBridgeServer` target under the swift-certificates pin.
+- Pairing/session state machines, active-session expiry and authorization-change coordination, listener, WebSocket, Bonjour, observe/replay, and command transport continue from Step 2.5 in plan order. The remaining ADR pins (`swift-nio`, `swift-nio-transport-services`) are adopted only at Step 2.7; Step 2.4b added no dependency.
 - The spike's deferred implementation gaps (rate limiting, slow-consumer policy, idle expiry, ping/pong deadlines, live `NWInterface` pinning, lifecycle-generation integration, `NWListener.service` physical re-verification, app-level connection caps, registry-based teardown) — owned by named steps in ADR §16.
 - Phone approval execution or approval assertion types — rejected throughout Phase 2; Phase 4 scope.
 - Physical-device claims — only at the post-provisional Phase 2 acceptance gate (Step 2.14).
