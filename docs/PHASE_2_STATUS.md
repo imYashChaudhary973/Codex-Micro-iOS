@@ -1,6 +1,6 @@
 # Phase 2 — Secure Local Pairing and Networking Status
 
-**Status:** Step 2.5 implemented (pending review/merge) — Step 2.6 (authenticated session state machine) is next
+**Status:** Step 2.5 merged — Step 2.6 (authenticated session state machine) is next
 
 **Snapshot:** 2026-08-02
 
