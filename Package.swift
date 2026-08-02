@@ -10,6 +10,7 @@ let package = Package(
   ],
   products: [
     .library(name: "CodexAppServer", targets: ["CodexAppServer"]),
+    .library(name: "CompanionCrypto", targets: ["CompanionCrypto"]),
     .library(name: "CompanionProtocol", targets: ["CompanionProtocol"]),
     .library(name: "MacBridgeCore", targets: ["MacBridgeCore"]),
     .executable(name: "codex-micro-spike", targets: ["CodexMicroSpike"]),
@@ -18,6 +19,10 @@ let package = Package(
   targets: [
     .target(name: "CodexAppServer"),
     .target(name: "CompanionProtocol"),
+    .target(
+      name: "CompanionCrypto",
+      dependencies: ["CompanionProtocol"]
+    ),
     .target(
       name: "MacBridgeCore",
       dependencies: ["CodexAppServer", "CompanionProtocol"],
@@ -42,6 +47,10 @@ let package = Package(
     .testTarget(
       name: "CodexAppServerTests",
       dependencies: ["CodexAppServer", "CodexTestSupport"]
+    ),
+    .testTarget(
+      name: "CompanionCryptoTests",
+      dependencies: ["CompanionCrypto", "CompanionProtocol"]
     ),
     .testTarget(
       name: "MacBridgeCoreTests",
