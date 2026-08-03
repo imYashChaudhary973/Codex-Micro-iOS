@@ -61,6 +61,37 @@ public struct ListenerCeilings: Equatable, Sendable {
   /// below it and never exceed it.
   public static let preUpgradeByteCeiling = 2 * SecureTransportLimits.maxHeaderTotalBytes
 
+  /// Concurrent unauthenticated connections **one source** may hold.
+  ///
+  /// The ADR fixes 4 concurrent unauthenticated connections globally and says
+  /// nothing about their distribution, which made those 4 the total number of
+  /// simultaneous peers that can be mid-handshake: four cheap connections
+  /// holding their slots for the full authentication deadline denied the LAN
+  /// feature to everyone, and repeating that cost an attacker nothing.
+  ///
+  /// This caps how many of the global slots any single source may occupy. It
+  /// adds a number the ADR does not fix, but only ever **tightens**: the
+  /// global ceiling is unchanged, and a legitimate device needs exactly one
+  /// slot.
+  public let maxUnauthenticatedConnectionsPerSource: Int
+
+  /// How long an admitted connection may hold an unauthenticated slot without
+  /// sending a single allowlisted handshake message.
+  ///
+  /// The authentication deadline bounds a peer that is *talking*; this bounds
+  /// one that is silent. A real device sends its first handshake message
+  /// immediately after the upgrade, so a connection that sends nothing is
+  /// evicted long before the 20-second deadline it would otherwise squat on.
+  /// Also a tightening: it can only close connections the deadline would have
+  /// closed later.
+  public let unauthenticatedSilenceSeconds: Int
+
+  /// The default per-source share of the global unauthenticated ceiling.
+  public static let defaultMaxUnauthenticatedConnectionsPerSource = 2
+
+  /// The default silence budget for an unauthenticated connection.
+  public static let defaultUnauthenticatedSilenceSeconds = 5
+
   /// Creates a ceiling set; the defaults are the ADR §9 values.
   public init(
     upgradeDeadlineSeconds: Int = SecureTransportLimits.upgradeDeadlineSeconds,
@@ -79,9 +110,15 @@ public struct ListenerCeilings: Equatable, Sendable {
     pingCadenceSeconds: Int = SecureTransportLimits.pingCadenceSeconds,
     pongDeadlineSeconds: Int = SecureTransportLimits.pongDeadlineSeconds,
     idleExpirySeconds: Int = SecureTransportLimits.idleExpirySeconds,
-    maxPreUpgradeBytes: Int = ListenerCeilings.preUpgradeByteCeiling
+    maxPreUpgradeBytes: Int = ListenerCeilings.preUpgradeByteCeiling,
+    maxUnauthenticatedConnectionsPerSource: Int = ListenerCeilings
+      .defaultMaxUnauthenticatedConnectionsPerSource,
+    unauthenticatedSilenceSeconds: Int = ListenerCeilings
+      .defaultUnauthenticatedSilenceSeconds
   ) {
     self.maxPreUpgradeBytes = maxPreUpgradeBytes
+    self.maxUnauthenticatedConnectionsPerSource = maxUnauthenticatedConnectionsPerSource
+    self.unauthenticatedSilenceSeconds = unauthenticatedSilenceSeconds
     self.upgradeDeadlineSeconds = upgradeDeadlineSeconds
     self.authenticationDeadlineSeconds = authenticationDeadlineSeconds
     self.maxConcurrentConnections = maxConcurrentConnections
@@ -128,8 +165,25 @@ public struct ListenerCeilings: Equatable, Sendable {
     for (value, ceiling) in bounds where value <= 0 || value > ceiling {
       throw ListenerStartupFailure.ceilingsExceedADR
     }
+    // The two tightenings have no ADR row of their own; their ceilings are
+    // other ceilings, checked below. Only positivity belongs here.
+    guard maxUnauthenticatedConnectionsPerSource > 0, unauthenticatedSilenceSeconds > 0 else {
+      throw ListenerStartupFailure.ceilingsExceedADR
+    }
     guard maxUnauthenticatedConnections <= maxConcurrentConnections else {
       throw ListenerStartupFailure.ceilingsExceedADR
+    }
+    // A per-source share above the global ceiling would let one source hold
+    // every slot again, which is exactly the condition this value exists to
+    // prevent.
+    guard maxUnauthenticatedConnectionsPerSource <= maxUnauthenticatedConnections else {
+      throw ListenerStartupFailure.ceilingsInconsistent
+    }
+    // The silence budget must fit strictly inside the deadline it tightens;
+    // at or above it the budget would never fire and the squatting window
+    // would be back.
+    guard unauthenticatedSilenceSeconds < authenticationDeadlineSeconds else {
+      throw ListenerStartupFailure.ceilingsInconsistent
     }
     // Consistency: the server ping cadence must stay outside the window an
     // unauthenticated peer can occupy. The keep-alive handler additionally
@@ -212,7 +266,7 @@ public final class ListenerConnectionTicket: @unchecked Sendable {
       return true
     }
     if promote {
-      controller?.promote()
+      controller?.promote(source: source)
     }
   }
 
@@ -224,7 +278,7 @@ public final class ListenerConnectionTicket: @unchecked Sendable {
       return (true, authenticated)
     }
     guard state.0 else { return }
-    controller?.release(wasAuthenticated: state.1)
+    controller?.release(wasAuthenticated: state.1, source: source)
     controller = nil
   }
 
@@ -277,6 +331,7 @@ public final class ListenerAdmissionController: @unchecked Sendable {
   private var accepting = true
   private var activeConnections = 0
   private var activeUnauthenticated = 0
+  private var unauthenticatedBySource: [ListenerSourceKey: Int] = [:]
   private var sources: [ListenerSourceKey: SourceWindows] = [:]
 
   /// Creates a controller.
@@ -308,6 +363,12 @@ public final class ListenerAdmissionController: @unchecked Sendable {
       guard activeUnauthenticated < ceilings.maxUnauthenticatedConnections else {
         return .failure(.unauthenticatedCapacity)
       }
+      // One source may not occupy the whole unauthenticated ceiling, or four
+      // cheap connections from it would deny the feature to every other peer.
+      let heldBySource = unauthenticatedBySource[source] ?? 0
+      guard heldBySource < ceilings.maxUnauthenticatedConnectionsPerSource else {
+        return .failure(.unauthenticatedCapacity)
+      }
       var windows = sources[source] ?? SourceWindows()
       windows.connections = Self.pruned(windows.connections, at: instant)
       guard windows.connections.count < ceilings.maxNewConnectionsPerSourcePerMinute else {
@@ -318,6 +379,7 @@ public final class ListenerAdmissionController: @unchecked Sendable {
       sources[source] = windows
       activeConnections += 1
       activeUnauthenticated += 1
+      unauthenticatedBySource[source] = heldBySource + 1
       return .success(ListenerConnectionTicket(controller: self, source: source))
     }
   }
@@ -422,18 +484,38 @@ public final class ListenerAdmissionController: @unchecked Sendable {
     }
   }
 
-  fileprivate func promote() {
+  fileprivate func promote(source: ListenerSourceKey) {
     lock.withLock {
       guard activeUnauthenticated > 0 else { return }
       activeUnauthenticated -= 1
+      releaseSourceSlotLocked(source)
     }
   }
 
-  fileprivate func release(wasAuthenticated: Bool) {
+  fileprivate func release(wasAuthenticated: Bool, source: ListenerSourceKey) {
     lock.withLock {
       if activeConnections > 0 { activeConnections -= 1 }
-      if !wasAuthenticated, activeUnauthenticated > 0 { activeUnauthenticated -= 1 }
+      if !wasAuthenticated, activeUnauthenticated > 0 {
+        activeUnauthenticated -= 1
+        releaseSourceSlotLocked(source)
+      }
     }
+  }
+
+  private func releaseSourceSlotLocked(_ source: ListenerSourceKey) {
+    guard let held = unauthenticatedBySource[source] else { return }
+    if held <= 1 {
+      unauthenticatedBySource.removeValue(forKey: source)
+    } else {
+      unauthenticatedBySource[source] = held - 1
+    }
+  }
+
+  /// Unauthenticated slots one source currently holds. Exposed so a test can
+  /// prove the per-source cap is real accounting rather than a one-shot
+  /// check.
+  public func unauthenticatedCount(for source: ListenerSourceKey) -> Int {
+    lock.withLock { unauthenticatedBySource[source] ?? 0 }
   }
 
   private static func pruned(_ samples: [UInt64], at instant: UInt64) -> [UInt64] {

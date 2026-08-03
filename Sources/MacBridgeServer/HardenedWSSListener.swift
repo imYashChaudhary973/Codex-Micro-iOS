@@ -560,6 +560,7 @@ public enum ListenerPipeline {
         ticket: ticket,
         handshake: handshake,
         authenticationDeadline: .seconds(Int64(ceilings.authenticationDeadlineSeconds)),
+        silenceBudget: .seconds(Int64(ceilings.unauthenticatedSilenceSeconds)),
         logger: logger
       ),
       ListenerObservationHandler(

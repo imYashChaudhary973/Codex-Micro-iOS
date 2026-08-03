@@ -385,12 +385,15 @@ final class ListenerCeilingTests: XCTestCase {
         ticket: ticket,
         handshake: ScriptedHandshakeHandler(),
         authenticationDeadline: .seconds(20),
+        // Longer than this test's window, so it still proves the
+        // authentication deadline rather than the silence budget.
+        silenceBudget: .seconds(19),
         logger: DiscardingListenerLogger()
       ))
-    channel.embeddedEventLoop.advanceTime(by: .seconds(19))
+    channel.embeddedEventLoop.advanceTime(by: .seconds(18))
     XCTAssertTrue(channel.isActive)
     channel.embeddedEventLoop.advanceTime(by: .seconds(1))
-    XCTAssertFalse(channel.isActive)
+    XCTAssertFalse(channel.isActive, "a silent peer is bounded by the silence budget")
   }
 
   // MARK: - Keep-alive, pong deadline, idle expiry
