@@ -73,6 +73,21 @@ actor FakeTurnStarter: CodexTurnStarting {
   }
 }
 
+/// Deterministic turn steerer that records every steer.
+actor FakeTurnSteerer: CodexTurnSteering {
+  private(set) var steered: [(threadID: String, turnID: String, prompt: String)] = []
+  private var failure: (any Error)?
+
+  func setFailure(_ error: (any Error)?) { failure = error }
+
+  var steerCount: Int { steered.count }
+
+  func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
+    steered.append((threadID, turnID, prompt))
+    if let failure { throw failure }
+  }
+}
+
 /// Deterministic writable-root source.
 final class FakeWorkspaceRootResolver: WorkspaceRootResolving, @unchecked Sendable {
   private let lock = NSLock()
@@ -180,7 +195,6 @@ final class NetworkCommandGatewayTests: XCTestCase {
     let bodies: [ClientCommandBody] = [
       .selectThread(threadID: "thread-a"),
       .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: []),
-      .steerTurn(threadID: "thread-a", turnID: "turn-1", prompt: "hi"),
     ]
 
     for body in bodies {
@@ -193,24 +207,25 @@ final class NetworkCommandGatewayTests: XCTestCase {
   func testTheAllowlistIsExactlyTheEnabledMutations() {
     XCTAssertEqual(
       NetworkCommandGateway.allowedCommandKinds,
-      [.interruptTurn, .markThreadRead, .sendPrompt]
+      [.interruptTurn, .markThreadRead, .sendPrompt, .steerTurn]
     )
   }
 
-  /// `sendPrompt` is on the allowlist but gated a second time by the grant.
-  /// The Step 2.9 fixture's grant has no `.runAgent`, so it is still denied —
-  /// just for the right reason.
-  func testSendPromptIsAllowlistedButStillNeedsTheRunAgentGrant() async throws {
+  /// Both agent commands are on the allowlist but gated a second time by the
+  /// grant. The Step 2.9 fixture's grant has no `.runAgent`, so they are
+  /// still denied — just for the right reason.
+  func testAgentCommandsAreAllowlistedButStillNeedTheRunAgentGrant() async throws {
     let world = try await World()
-    let command = try ClientCommand(
-      commandID: UUID(),
-      issuedAt: World.now,
-      body: .sendPrompt(threadID: "thread-a", prompt: "hi", attachmentIDs: [])
-    )
+    let bodies: [ClientCommandBody] = [
+      .sendPrompt(threadID: "thread-a", prompt: "hi", attachmentIDs: []),
+      .steerTurn(threadID: "thread-a", turnID: "turn-1", prompt: "hi"),
+    ]
 
-    let outcome = await world.gateway.execute(command: command, context: world.context)
-
-    XCTAssertEqual(outcome, .denied(.capabilityMissing))
+    for body in bodies {
+      let command = try ClientCommand(commandID: UUID(), issuedAt: World.now, body: body)
+      let outcome = await world.gateway.execute(command: command, context: world.context)
+      XCTAssertEqual(outcome, .denied(.capabilityMissing), "\(body.kind)")
+    }
   }
 
   func testClosedSurfacesAreRejectedBeforeAnyLedgerClaimExists() async throws {
@@ -569,6 +584,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
     let storage = InMemoryGrantAuthorityStore()
     let responder = FakeCommandResponder()
     let turnStarter = FakeTurnStarter()
+    let turnSteerer = FakeTurnSteerer()
+    let turnPolicies = TurnPolicyRegistry()
     let workspaceRoots = FakeWorkspaceRootResolver()
     let readCursors: DeviceReadCursorStore
     let context: NetworkCommandContext
@@ -608,6 +625,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
         runtime: runtime,
         responder: responder,
         turnStarter: turnStarter,
+        turnSteerer: turnSteerer,
+        turnPolicies: turnPolicies,
         workspaceRoots: workspaceRoots,
         readCursors: readCursors
       )

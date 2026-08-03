@@ -328,6 +328,10 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     throw CodexRuntimeRequestError.notReady
   }
 
+  func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
+
   func yield(_ event: AppServerEvent) {
     continuation.yield(event)
   }

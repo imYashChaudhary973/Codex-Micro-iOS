@@ -43,6 +43,13 @@ public protocol CodexRuntimeSession: Sendable {
     prompt: String,
     policy: PhoneTurnPolicy
   ) async throws -> String
+
+  /// Steers exactly one in-progress turn with additional prompt text.
+  ///
+  /// Steering never widens a turn's policy: the turn keeps the sandbox,
+  /// roots, network, and approval settings it was started with, and this
+  /// call carries no policy fields at all.
+  func steerTurn(threadID: String, turnID: String, prompt: String) async throws
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -97,6 +104,25 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
       throw CodexRuntimeRequestError.notReady
     }
     return turnID
+  }
+
+  /// Steers one in-progress turn.
+  ///
+  /// The request carries exactly the turn's identity and the new input. It
+  /// deliberately carries **no** sandbox, approval, root, or network field:
+  /// a steered turn keeps the policy it was started under, so steering can
+  /// never widen it.
+  public func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
+    _ = try await client.request(
+      method: "turn/steer",
+      params: .object([
+        "threadId": .string(threadID),
+        "turnId": .string(turnID),
+        "input": .array([
+          .object(["type": .string("text"), "text": .string(prompt)])
+        ]),
+      ])
+    )
   }
 }
 
@@ -164,6 +190,10 @@ public actor CodexRuntimeSupervisor {
 
   public func interruptTurn(threadID: String, turnID: String) async throws {
     try await readySession().interruptTurn(threadID: threadID, turnID: turnID)
+  }
+
+  public func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
+    try await readySession().steerTurn(threadID: threadID, turnID: turnID, prompt: prompt)
   }
 
   func readySession() throws -> any CodexRuntimeSession {

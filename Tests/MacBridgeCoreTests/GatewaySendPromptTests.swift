@@ -347,6 +347,8 @@ final class GatewaySendPromptTests: XCTestCase {
     let runtime = FakeNetworkRuntime()
     let responder = FakeCommandResponder()
     let turnStarter = FakeTurnStarter()
+    let turnSteerer = FakeTurnSteerer()
+    let turnPolicies = TurnPolicyRegistry()
     let workspaceRoots = FakeWorkspaceRootResolver()
     let readCursors: DeviceReadCursorStore
     let table = ThreadProjectTable()
@@ -388,6 +390,8 @@ final class GatewaySendPromptTests: XCTestCase {
         runtime: runtime,
         responder: responder,
         turnStarter: turnStarter,
+        turnSteerer: turnSteerer,
+        turnPolicies: turnPolicies,
         workspaceRoots: workspaceRoots,
         readCursors: readCursors,
         hostProfile: hostProfile

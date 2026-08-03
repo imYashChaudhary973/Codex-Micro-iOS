@@ -370,4 +370,8 @@ private struct FailingRuntimeSession: CodexRuntimeSession {
   ) async throws -> String {
     throw CodexRuntimeRequestError.notReady
   }
+
+  func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
+    throw CodexRuntimeRequestError.notReady
+  }
 }
