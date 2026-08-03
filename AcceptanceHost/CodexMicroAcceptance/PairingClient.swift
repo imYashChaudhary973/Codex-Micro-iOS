@@ -42,6 +42,29 @@ public final class PairingClient: NSObject, URLSessionDelegate, @unchecked Senda
     super.init()
   }
 
+  /// The exact upgrade values the listener requires (ADR §9).
+  ///
+  /// These are duplicated rather than imported because `MacBridgeServer` is
+  /// macOS-only. They are **not** cosmetic: the listener refuses the upgrade
+  /// unless the path, `Origin`, and subprotocol all match exactly, and it
+  /// refuses before any pairing byte is read — so omitting them fails as a
+  /// connection that closes, indistinguishable from a network problem.
+  public enum Upgrade {
+    public static let path = "/codex-micro/bridge/v1"
+    public static let origin = "https://codex-micro-bridge.invalid"
+    public static let subprotocol = "codex-micro.bridge.v1"
+  }
+
+  /// The URL to open for a bound endpoint, including the required path.
+  public static func url(host: String, port: Int) -> URL? {
+    var components = URLComponents()
+    components.scheme = "wss"
+    components.host = host
+    components.port = port
+    components.path = Upgrade.path
+    return components.url
+  }
+
   /// Opens the pinned socket. The URL comes from the QR's endpoint origin, so
   /// the phone never guesses an address.
   public func connect(to url: URL) {
@@ -49,7 +72,12 @@ public final class PairingClient: NSObject, URLSessionDelegate, @unchecked Senda
     configuration.timeoutIntervalForRequest = 10
     let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     self.session = session
-    let task = session.webSocketTask(with: url)
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 15
+    request.setValue(Upgrade.origin, forHTTPHeaderField: "Origin")
+    request.setValue(Upgrade.subprotocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
+    request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+    let task = session.webSocketTask(with: request)
     self.task = task
     task.resume()
   }

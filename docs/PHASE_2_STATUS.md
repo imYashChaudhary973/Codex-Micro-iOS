@@ -762,10 +762,22 @@ This is the first time this codebase has bound a real socket on a real interface
 
 **What this run is and is not.** It is real network, real Keychain, real Secure Enclave, real Bonjour, real TLS. It is **not** the physical iPhone matrix: the device half runs in the same process, so it proves the Mac and the transport, not a phone. Nine of the eleven plan §7 gate 13 cases remain untouched, and pairing over Bonjour is only partly covered — discovery by a real device is still unproven.
 
+### The real-device attempt, and the bug it found
+
+With the Mac half passing, the same path was driven against the **physical iPhone**: the Mac binds and publishes a pairing code, and the phone is launched with that code so the run is reproducible and its output readable. The camera is not the security boundary — the phrase is — and a scanned QR and a code supplied at launch produce byte-identical payloads over an identical transport, so this exercises everything the camera path does except the optics.
+
+The first attempt failed with `phone: failed — hostRejected`, and the Mac logged no claim at all: the connection died before a single pairing byte arrived.
+
+**`PairingClient` sent none of the required upgrade values.** ADR §9 fixes an exact path, `Origin`, and WebSocket subprotocol, and `ListenerUpgradePolicy` refuses the upgrade unless all three match — before reading any pairing message. The phone client set no headers and connected to the bare origin with no path, so every connection was refused at the HTTP upgrade. `PinnedProbeWebSocketClient` sets all three, which is why the loopback end-to-end test passed while the real device could never have worked.
+
+The client now sends them, and `PhoneUpgradeContractTests` states each constant a second time on the Mac side, so a divergence fails in CI rather than on a phone. It is the same pattern already used for the Bonjour service type: two independent statements of one literal, because the phone cannot import `MacBridgeServer`.
+
+The re-run is **blocked on a locked device**: `SBMainWorkspace` refuses to launch an app while the iPhone is locked. That is correct behaviour rather than an obstacle — the device identity is `WhenUnlockedThisDeviceOnly`, so a locked phone could not sign a transcript anyway, which is the property acceptance case 7 exists to check.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
-- **No phone has connected to the Mac.** The Mac binds real Wi-Fi, advertises over Bonjour, and completes pairing with an in-process device — but the iPhone has never been pointed at it, so device discovery, the camera scan, and the phone's own Enclave key are unproven in combination.
+- **No phone has completed pairing with the Mac.** The iPhone reached the Mac over real Wi-Fi and was refused at the WebSocket upgrade, which found a real defect in the phone client; the corrected build is installed but could not be launched because the device is locked. Device discovery over Bonjour, the camera scan, and the phone's own Enclave signature remain unproven in combination.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -775,9 +787,9 @@ This is the first time this codebase has bound a real socket on a real interface
 ## Current verification evidence
 
 ```text
-Root swift test: 987 passed, 0 failed
+Root swift test: 988 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 98, CodexAppServerTests 18)
+   CodexMicroBridgeTests 99, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean

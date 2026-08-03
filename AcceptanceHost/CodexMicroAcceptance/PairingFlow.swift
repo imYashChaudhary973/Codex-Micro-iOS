@@ -79,7 +79,12 @@ public actor PhonePairingFlow {
 
     let client = PairingClient(expectedSPKIFingerprint: payload.tlsSPKIFingerprint)
     self.client = client
-    guard let url = URL(string: payload.endpointOrigin.normalized) else {
+    // The origin names host and port; the listener additionally requires an
+    // exact path, so the URL is rebuilt rather than used verbatim.
+    guard let origin = URL(string: payload.endpointOrigin.normalized),
+      let host = origin.host,
+      let url = PairingClient.url(host: host, port: origin.port ?? 443)
+    else {
       await set(.failed(reason: "badEndpoint"))
       return
     }
@@ -103,8 +108,12 @@ public actor PhonePairingFlow {
       // A pin mismatch is the one failure worth naming distinctly on screen:
       // it means something on this network answered instead of the Mac.
       await set(.failed(reason: failure == .pinMismatch ? "pinMismatch" : "connectionFailed"))
+    } catch let closed as PairingClosedReason {
+      // The pairing state machine's own closed vocabulary. Collapsing these
+      // into one word is what made the first real-device run undiagnosable.
+      await set(.failed(reason: closed.rawValue))
     } catch {
-      await set(.failed(reason: "hostRejected"))
+      await set(.failed(reason: "hostRejected.\(type(of: error))"))
     }
   }
 
@@ -137,6 +146,63 @@ public actor PhonePairingFlow {
 
   private func set(_ next: PhonePairingState) async {
     await MainActor.run { model.set(next) }
+  }
+}
+
+/// Drives pairing from a code supplied at launch instead of the camera.
+///
+/// **The camera is not the security boundary — the phrase is.** A scanned QR
+/// and a code handed in at launch produce byte-identical payloads and travel
+/// the identical transport, so this exercises everything the camera path does
+/// except the optics. It exists because an acceptance run has to be
+/// reproducible and readable, and nobody can diff a photograph of a phone.
+///
+/// It is an acceptance affordance, gated on a launch environment variable that
+/// nothing persists and no shipped configuration sets. The camera remains the
+/// only way a user pairs.
+public enum PhoneAcceptanceRun {
+  public static let codeKey = "CODEX_MICRO_PAIRING_CODE"
+
+  public static var suppliedCode: String? {
+    guard let code = ProcessInfo.processInfo.environment[codeKey], !code.isEmpty else {
+      return nil
+    }
+    return code
+  }
+
+  static func report(_ step: String, _ detail: String = "") {
+    let line = detail.isEmpty ? "phone: \(step)" : "phone: \(step) — \(detail)"
+    FileHandle.standardError.write(Data((line + "\n").utf8))
+    print(line)
+  }
+
+  /// Runs the device half and reports each step.
+  ///
+  /// The phrase is printed rather than compared here: with a real device the
+  /// two phrases are derived on two machines from independently reconstructed
+  /// transcripts, so comparing them means reading both runs' output — which is
+  /// exactly what a user does with their eyes.
+  public static func run(code: String, model: PhonePairingModel) async {
+    report("start")
+    let flow = PhonePairingFlow(model: model)
+    await flow.begin(scannedText: code)
+
+    let state = await MainActor.run { model.state }
+    switch state {
+    case .comparing(let words):
+      report("phrase.device", words.joined(separator: " "))
+      await flow.confirmMatch()
+      let next = await MainActor.run { model.state }
+      if case .failed(let reason) = next {
+        report("confirm.failed", reason)
+      } else {
+        report("confirm.sent", "awaiting the Mac")
+      }
+    case .failed(let reason):
+      report("failed", reason)
+    default:
+      report("unexpectedState", "\(state)")
+    }
   }
 }
 
