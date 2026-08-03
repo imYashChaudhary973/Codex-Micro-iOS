@@ -62,6 +62,16 @@ public protocol ObservationSnapshotProviding: Sendable {
   func currentObservationSnapshot() async -> CompanionStateSnapshot
 }
 
+/// What applying a committed authorization change discarded for one device.
+public struct ObservationPurgeResult: Equatable, Sendable {
+  /// Whether the device held a subscription when the change was applied.
+  public let hadSubscription: Bool
+  /// Retained authorized events the change dropped.
+  public let discardedEvents: Int
+  /// Whether the device may still observe after the change.
+  public let retainsObservation: Bool
+}
+
 /// One device's subscription watermarks.
 public struct ObservationSubscription: Equatable, Sendable {
   public let subscriptionID: UUID
@@ -257,6 +267,38 @@ public actor DeviceObservationBroker {
   public func purge(deviceID: UUID) {
     subscriptions.removeValue(forKey: deviceID)
     views.removeValue(forKey: deviceID)
+  }
+
+  /// Applies an authorization change that has **already committed** in the
+  /// grant authority, and reports what the purge discarded.
+  ///
+  /// The authorization-change path calls this between the authority commit
+  /// and closing the device's connections, so no queued or retained data
+  /// survives the grant that authorized it even for the moment it takes the
+  /// transport to close (plan §2 invariant 11). It never reads the authority
+  /// twice for one decision: whatever the authority now says is what takes
+  /// effect.
+  @discardableResult
+  public func applyCommittedAuthorization(deviceID: UUID) async -> ObservationPurgeResult {
+    let hadSubscription = subscriptions[deviceID] != nil
+    let retainedBefore = views[deviceID]?.events(after: 0).count ?? 0
+    do {
+      let view = try await synchronizedView(deviceID: deviceID)
+      return ObservationPurgeResult(
+        hadSubscription: hadSubscription,
+        discardedEvents: max(0, retainedBefore - view.events(after: 0).count),
+        retainsObservation: true
+      )
+    } catch {
+      // `synchronizedView` already purged the device on the denial path; an
+      // unavailable authority is equally a reason to disclose nothing.
+      purge(deviceID: deviceID)
+      return ObservationPurgeResult(
+        hadSubscription: hadSubscription,
+        discardedEvents: retainedBefore,
+        retainsObservation: false
+      )
+    }
   }
 
   /// Test and diagnostic read of a device's subscription watermarks.
