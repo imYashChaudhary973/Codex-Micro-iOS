@@ -18,6 +18,14 @@ final class CanonicalEncodingGoldenVectorTests: XCTestCase {
     XCTAssertEqual(transcript.canonicalHash().hexFixture, GoldenVectors.sessionHashHex)
   }
 
+  func testSessionAuthenticationStatementGoldenEncoding() throws {
+    let statement = try CryptoFixtures.sessionAuthenticationStatement()
+    XCTAssertEqual(
+      statement.canonicalEncoding().hexFixture, GoldenVectors.sessionAuthStatementEncodingHex)
+    XCTAssertEqual(
+      statement.canonicalHash().hexFixture, GoldenVectors.sessionAuthStatementHashHex)
+  }
+
   func testRotationStatementGoldenEncoding() throws {
     let statement = try CryptoFixtures.rotationStatement()
     XCTAssertEqual(statement.canonicalEncoding().hexFixture, GoldenVectors.rotationEncodingHex)
@@ -28,6 +36,10 @@ final class CanonicalEncodingGoldenVectorTests: XCTestCase {
       (.pairingQRPayload, try PairingFixtures.qrPayload().canonicalEncoding()),
       (.pairingTranscript, try CryptoFixtures.pairingTranscript().canonicalEncoding()),
       (.sessionTranscript, try CryptoFixtures.sessionTranscript().canonicalEncoding()),
+      (
+        .sessionAuthenticationStatement,
+        try CryptoFixtures.sessionAuthenticationStatement().canonicalEncoding()
+      ),
       (.rotationStatement, try CryptoFixtures.rotationStatement().canonicalEncoding()),
     ]
     for (domain, encoding) in cases {
@@ -42,7 +54,7 @@ final class CanonicalEncodingGoldenVectorTests: XCTestCase {
   func testDomainSeparatorsAreDistinctASCII() {
     let domains = CanonicalStatementDomain.allCases.map(\.rawValue)
     XCTAssertEqual(Set(domains).count, domains.count)
-    XCTAssertEqual(domains.count, 7)
+    XCTAssertEqual(domains.count, 8)
     for domain in domains {
       XCTAssertTrue(domain.allSatisfy(\.isASCII))
       XCTAssertTrue(domain.hasSuffix("/v1"))

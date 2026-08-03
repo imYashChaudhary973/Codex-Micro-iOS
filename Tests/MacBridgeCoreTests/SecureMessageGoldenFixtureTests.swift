@@ -19,8 +19,14 @@ extension SecureFixtures {
   static let authRequestJSON =
     #"{"deviceEphemeralPublicKey":"MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=","deviceID":"33333333-3333-3333-3333-333333333333","deviceNonce":"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=","selection":{"features":["observe-sync-v1","thread-read-cursor-v1","turn-interrupt-v1"],"major":1,"minor":1},"transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
 
+  /// The reply carries no grant revision, authorized-view epoch, or host
+  /// generation: the device is not authenticated when it arrives, so no
+  /// authority metadata may appear here (plan §7 gate 2).
   static let authResponseJSON =
-    #"{"authorizedViewEpoch":3,"grantRevision":7,"hostEphemeralPublicKey":"VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=","hostGeneration":1,"hostNonce":"REREREREREREREREREREREREREREREREREREREREREQ=","selection":{"features":["observe-sync-v1","thread-read-cursor-v1","turn-interrupt-v1"],"major":1,"minor":1},"sessionID":"44444444-4444-4444-4444-444444444444","transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
+    #"{"hostEphemeralPublicKey":"VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=","hostNonce":"REREREREREREREREREREREREREREREREREREREREREQ=","selection":{"features":["observe-sync-v1","thread-read-cursor-v1","turn-interrupt-v1"],"major":1,"minor":1},"sessionID":"44444444-4444-4444-4444-444444444444","transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
+
+  static let authConfirmationJSON =
+    #"{"deviceID":"33333333-3333-3333-3333-333333333333","sessionID":"44444444-4444-4444-4444-444444444444","transcriptSignature":"ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg=="}"#
 
   static let subscribeJSON =
     #"{"resumeCursor":{"authorizedViewEpoch":3,"deviceID":"33333333-3333-3333-3333-333333333333","grantRevision":7,"journalEpoch":"d3d3d3d3d3d3d3d3d3d3dw==","sequence":42},"subscriptionID":"55555555-5555-5555-5555-555555555555"}"#
@@ -109,12 +115,23 @@ final class SecureMessageGoldenFixtureTests: XCTestCase {
       selection: SecureFixtures.selection(),
       hostEphemeralPublicKey: Data(repeating: 0x55, count: 65),
       hostNonce: Data(repeating: 0x44, count: 32),
-      grantRevision: 7,
-      authorizedViewEpoch: 3,
-      hostGeneration: 1,
       transcriptSignature: Data(repeating: 0x66, count: 64)
     )
     try assertGolden(message, matches: SecureFixtures.authResponseJSON)
+    // The golden vector is the guard against an authority field returning:
+    // nothing in the reply may name grant state.
+    for forbidden in ["grantRevision", "authorizedViewEpoch", "hostGeneration"] {
+      XCTAssertFalse(SecureFixtures.authResponseJSON.contains(forbidden))
+    }
+  }
+
+  func testSessionAuthConfirmationGoldenFixture() throws {
+    let message = try SecureSessionAuthConfirmation(
+      sessionID: SecureFixtures.sessionID,
+      deviceID: SecureFixtures.deviceID,
+      transcriptSignature: Data(repeating: 0x66, count: 64)
+    )
+    try assertGolden(message, matches: SecureFixtures.authConfirmationJSON)
   }
 
   func testObservationSubscribeGoldenFixture() throws {
