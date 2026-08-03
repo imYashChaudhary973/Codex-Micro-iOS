@@ -25,6 +25,22 @@ struct BridgeMenu: View {
     Text("Threads: \(model.threadCount)")
     Text("Pending approvals: \(model.pendingApprovalCount)")
     Divider()
+    // Redacted connection metrics (plan Step 2.13). Every line is a count or
+    // a closed state; `BridgeConnectionMetrics` has no field that could carry
+    // an address, name, or identifier.
+    ForEach(model.metrics.menuLines, id: \.self) { line in
+      Text(line)
+    }
+    Divider()
+    // The LAN control. It is deliberately the only way to turn the listener
+    // on, and it is off on every launch: enablement is never remembered,
+    // because a bridge that silently re-enables itself after a restart is a
+    // listener the user did not ask for this time.
+    Button(model.lanButtonTitle) {
+      model.toggleLANAccess()
+    }
+    .disabled(!model.isLANControlEnabled)
+    Divider()
     Button("Quit Codex Micro Bridge") {
       NSApp.terminate(nil)
     }
