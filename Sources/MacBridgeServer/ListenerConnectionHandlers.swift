@@ -465,8 +465,12 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
   private let handshake: any ListenerHandshakeHandling
   private let allowlist = ListenerPreAuthAllowlist()
   private let authenticationDeadline: TimeAmount
+  /// How long an admitted connection may hold its unauthenticated slot
+  /// without sending a single allowlisted handshake message.
+  private let silenceBudget: TimeAmount
   private let logger: any ListenerLogging
   private var deadlineTask: Scheduled<Void>?
+  private var silenceTask: Scheduled<Void>?
   private var authenticated = false
   private var dispatchInFlight = false
 
@@ -478,6 +482,7 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
     ticket: ListenerConnectionTicket,
     handshake: any ListenerHandshakeHandling,
     authenticationDeadline: TimeAmount,
+    silenceBudget: TimeAmount,
     logger: any ListenerLogging
   ) {
     self.connectionID = connectionID
@@ -486,6 +491,7 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
     self.ticket = ticket
     self.handshake = handshake
     self.authenticationDeadline = authenticationDeadline
+    self.silenceBudget = silenceBudget
     self.logger = logger
   }
 
@@ -500,6 +506,8 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
       authenticated = true
       deadlineTask?.cancel()
       deadlineTask = nil
+      silenceTask?.cancel()
+      silenceTask = nil
     }
     context.fireUserInboundEventTriggered(event)
   }
@@ -535,6 +543,7 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
         refuse(context: context, reason: ListenerPreAuthAllowlist.collapsedRefusal)
         return
       }
+      startSilenceBudget(context: context)
       dispatch(envelope, context: context)
     }
   }
@@ -542,6 +551,8 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
   public func channelInactive(context: ChannelHandlerContext) {
     deadlineTask?.cancel()
     deadlineTask = nil
+    silenceTask?.cancel()
+    silenceTask = nil
     let handshake = self.handshake
     let connectionID = self.connectionID
     Task { await handshake.abandon(connectionID: connectionID) }
@@ -554,6 +565,26 @@ public final class ListenerHandshakeGateHandler: ChannelInboundHandler, @uncheck
     let logger = self.logger
     deadlineTask = context.eventLoop.scheduleTask(in: authenticationDeadline) {
       logger.record(.authenticationDeadlineElapsed)
+      channel.close(promise: nil)
+    }
+    startSilenceBudget(context: context)
+  }
+
+  /// Arms the silence budget.
+  ///
+  /// The authentication deadline bounds a peer that is *talking*; this bounds
+  /// one that is silent. A real device sends its first handshake message
+  /// immediately after the upgrade, so a connection that sends nothing gives
+  /// its unauthenticated slot back long before the full deadline it would
+  /// otherwise squat on. Each accepted message rearms it, so a peer that is
+  /// making progress is never cut off early.
+  private func startSilenceBudget(context: ChannelHandlerContext) {
+    guard !authenticated else { return }
+    silenceTask?.cancel()
+    let channel = context.channel
+    let logger = self.logger
+    silenceTask = context.eventLoop.scheduleTask(in: silenceBudget) {
+      logger.record(.unauthenticatedSilenceElapsed)
       channel.close(promise: nil)
     }
   }

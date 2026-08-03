@@ -133,12 +133,15 @@ final class ListenerAssembledPipelineTests: XCTestCase {
   func testNoServerTrafficIsEmittedBeforeAuthentication() async throws {
     let harness = try await assemble()
 
-    // The authentication deadline closes first; no ping is ever emitted.
+    // A silent unauthenticated connection now closes at its silence budget,
+    // well before the authentication deadline. Either way no ping is emitted:
+    // the cadence starts only at authentication.
     await harness.channel.testingEventLoop.advanceTime(by: .seconds(20))
     XCTAssertFalse(harness.channel.isActive)
     let readBack = try await harness.channel.readOutbound(as: WebSocketFrame.self)
     XCTAssertNil(readBack)
-    XCTAssertEqual(harness.logger.count(of: .authenticationDeadlineElapsed), 1)
+    XCTAssertEqual(harness.logger.count(of: .unauthenticatedSilenceElapsed), 1)
+    XCTAssertEqual(harness.logger.count(of: .authenticationDeadlineElapsed), 0)
   }
 
   // MARK: - Control frames are metered and accounted
@@ -325,16 +328,22 @@ final class ListenerAssembledPipelineTests: XCTestCase {
       ticket: ticket,
       handshake: ScriptedHandshakeHandler(),
       authenticationDeadline: .seconds(20),
+      // The silence budget is deliberately longer than this test's window, so
+      // it proves the authentication deadline in isolation.
+      // Longer than the whole window below, so this test proves the
+      // authentication deadline is armed by the upgrade event alone rather
+      // than proving the silence budget.
+      silenceBudget: .seconds(19),
       logger: DiscardingListenerLogger()
     )
     // Added while inactive, so only the upgrade event can start the deadline.
     try channel.pipeline.syncOperations.addHandler(gate)
     try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0)).wait()
     channel.pipeline.fireUserInboundEventTriggered(ListenerUpgradeCompleted())
-    channel.embeddedEventLoop.advanceTime(by: .seconds(19))
+    channel.embeddedEventLoop.advanceTime(by: .seconds(18))
     XCTAssertTrue(channel.isActive)
     channel.embeddedEventLoop.advanceTime(by: .seconds(1))
-    XCTAssertFalse(channel.isActive)
+    XCTAssertFalse(channel.isActive, "the silence budget bounds a silent peer")
   }
 
   // MARK: - Pre-upgrade byte budget

@@ -114,6 +114,7 @@ final class ListenerPreAuthGateTests: XCTestCase {
         ticket: ticket,
         handshake: ScriptedHandshakeHandler(),
         authenticationDeadline: .seconds(20),
+        silenceBudget: .seconds(19),
         logger: DiscardingListenerLogger()
       ))
 
@@ -155,6 +156,7 @@ final class ListenerPreAuthGateTests: XCTestCase {
         ticket: ticket,
         handshake: handler,
         authenticationDeadline: .seconds(20),
+        silenceBudget: .seconds(19),
         logger: DiscardingListenerLogger()
       ))
 
@@ -190,6 +192,7 @@ final class ListenerPreAuthGateTests: XCTestCase {
           ticket: ticket,
           handshake: ScriptedHandshakeHandler(),
           authenticationDeadline: .seconds(20),
+          silenceBudget: .seconds(19),
           logger: DiscardingListenerLogger()
         ))
       var buffer = channel.allocator.buffer(capacity: payload.count)
@@ -281,6 +284,7 @@ final class ListenerPreAuthGateTests: XCTestCase {
         ticket: ticket,
         handshake: ScriptedHandshakeHandler(),
         authenticationDeadline: .seconds(20),
+        silenceBudget: .seconds(19),
         logger: DiscardingListenerLogger()
       ))
     var buffer = channel.allocator.buffer(capacity: 64)

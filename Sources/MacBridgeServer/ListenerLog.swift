@@ -57,6 +57,9 @@ public enum ListenerLogCode: String, CaseIterable, Sendable {
   case observationDelivered = "observation_delivered"
   /// One closed command result was sealed and written.
   case commandResultDelivered = "command_result_delivered"
+  /// An unauthenticated connection was closed for holding its slot without
+  /// sending an allowlisted handshake message.
+  case unauthenticatedSilenceElapsed = "unauthenticated_silence_elapsed"
   /// A handshake message was refused by its per-source ceiling.
   case handshakeRateExceeded = "handshake_rate_exceeded"
   /// A peer exceeded the pre-upgrade byte budget.
