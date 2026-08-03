@@ -16,7 +16,7 @@
 
 /* Begin PBXFileReference section */
 		BB0000000000000000000005 /* CodexMicroBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodexMicroBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		BB0000000000000000000016 /* CodexMicroBridge.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CodexMicroBridge.entitlements; sourceTree = "<group>"; };
+		BB0000000000000000000016 /* CodexMicroBridge.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacHost/CodexMicroBridge.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -35,7 +35,7 @@
 			exceptions = (
 				BB0000000000000000000017 /* Exceptions */,
 			);
-			path = ../Sources/CodexMicroBridge;
+			path = Sources/CodexMicroBridge;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -201,14 +201,14 @@
 		BB000000000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CodexMicroBridge.entitlements;
+				CODE_SIGN_ENTITLEMENTS = MacHost/CodexMicroBridge.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8QSM298XJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "../Sources/CodexMicroBridge/Info.plist";
+				INFOPLIST_FILE = Sources/CodexMicroBridge/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -223,14 +223,14 @@
 		BB000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CodexMicroBridge.entitlements;
+				CODE_SIGN_ENTITLEMENTS = MacHost/CodexMicroBridge.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8QSM298XJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "../Sources/CodexMicroBridge/Info.plist";
+				INFOPLIST_FILE = Sources/CodexMicroBridge/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -268,7 +268,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		BB0000000000000000000010 /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
+			relativePath = .;
 		};
 /* End XCLocalSwiftPackageReference section */
 

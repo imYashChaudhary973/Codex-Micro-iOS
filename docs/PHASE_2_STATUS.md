@@ -722,10 +722,50 @@ Adding the entitlement to the `codesign` step **made the app stop launching enti
 
 A fourth, smaller problem: the menu-bar item is unreachable on a Mac whose menu bar is full, because macOS silently drops overflow items rather than showing them. `CODEX_MICRO_SHOW_DOCK=1` opts into a Dock icon for the acceptance run. It is env-gated, so the menu-bar-only default from Step 2.13 is unchanged.
 
+### The full acceptance path runs, and it found the last blocker
+
+`BridgeAcceptanceRun` drives the whole path from inside the signed app — the only place the protocol and the environment meet, because a unit test has neither the Data Protection Keychain, the Secure Enclave, nor permission to publish a Bonjour record.
+
+The first run failed at `lan.failed — startupDenied`, which is the right vocabulary for a menu and useless for diagnosis: it collapses five independent refusals into one word. Probing each prerequisite separately named it immediately:
+
+```text
+preflight.interface.ok        en0 kind=wifi
+preflight.codex.ok
+preflight.policy.ok
+preflight.grantAuthority.failed   authorityMissing
+preflight.tlsIdentity.ok      spki=32 bytes
+```
+
+**A freshly installed bridge could never start.** `DataProtectionKeychainGrantStore` deliberately refuses to create its own item — its own comment records that "only explicit first-install provisioning may create the item" — so that an authority which *vanishes* reads as loss rather than being silently recreated empty, which would drop every revocation it held. Nothing performed that provisioning step. The grant-authority probe refused, LAN stayed off, and pairing — the only thing that creates a grant — was unreachable. A perfect chicken-and-egg, and one that only appears on a machine that has never run the bridge before.
+
+`BridgeAuthorityProvisioning` fixes it without weakening the rule it exists to serve. The Keychain cannot distinguish "never existed" from "existed and is gone"; both are `errSecItemNotFound`. So provisioning records a marker, and the two separate cleanly: no marker and no item is a first install; a marker with no item is **loss**, and fails closed with `authority.lost` rather than recreating an empty authority that would silently un-revoke every device ever revoked.
+
+### Full end-to-end acceptance run — PASS
+
+```text
+acceptance: preflight.interface.ok — en0 kind=wifi
+acceptance: preflight.codex.ok
+acceptance: preflight.policy.ok
+acceptance: preflight.grantAuthority.ok
+acceptance: preflight.tlsIdentity.ok — spki=32 bytes
+acceptance: lan.enabled — port=58103 advertising=true
+acceptance: pairing.session — qr=300 chars
+acceptance: pairing.connecting — host=192.168.31.172
+acceptance: tls.pinned — real TLS 1.3 over LAN, SPKI matched
+acceptance: phrase.matched — kool rair tof dud veed nap
+acceptance: pairing.confirmed
+acceptance: grant.stored — capabilities=view projects=0 ceiling=observe
+acceptance: PASS — paired over real Wi-Fi and the grant is stored
+```
+
+This is the first time this codebase has bound a real socket on a real interface, published a real Bonjour record, completed a real TLS 1.3 handshake against a pinned SPKI over a LAN address, run the pairing choreography to completion, and stored a grant. Every one of those was outstanding an hour earlier.
+
+**What this run is and is not.** It is real network, real Keychain, real Secure Enclave, real Bonjour, real TLS. It is **not** the physical iPhone matrix: the device half runs in the same process, so it proves the Mac and the transport, not a phone. Nine of the eleven plan §7 gate 13 cases remain untouched, and pairing over Bonjour is only partly covered — discovery by a real device is still unproven.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
-- **No phone has connected to the Mac.** Both halves now exist and pairing is proven end to end over loopback, but nothing has crossed real Wi-Fi: no Bonjour record has been published, and the acceptance host has never been pointed at the bridge.
+- **No phone has connected to the Mac.** The Mac binds real Wi-Fi, advertises over Bonjour, and completes pairing with an in-process device — but the iPhone has never been pointed at it, so device discovery, the camera scan, and the phone's own Enclave key are unproven in combination.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -735,9 +775,9 @@ A fourth, smaller problem: the menu-bar item is unreachable on a Mac whose menu 
 ## Current verification evidence
 
 ```text
-Root swift test: 982 passed, 0 failed
+Root swift test: 987 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 93, CodexAppServerTests 18)
+   CodexMicroBridgeTests 98, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
@@ -755,7 +795,11 @@ Acceptance host, development-signed (-allowProvisioningUpdates): BUILD SUCCEEDED
     NSBonjourServices == [_codexmicro._tcp], usage description present
 App installed on a physical device: yes — iPhone 13, 00008110-00090C660EC0A01E,
   launched and its readiness output captured from the device console
-Physical acceptance cases run: none — 0 of 11
+Physical acceptance cases run: none of the 11 in full. The Mac half of case 3
+  (pairing over Bonjour) passed against an in-process device over real Wi-Fi;
+  discovery and scanning by a real iPhone remain unproven
+Real socket bound: yes — en0 (Wi-Fi), first time from this codebase
+Real Bonjour record published: yes — advertising=true from the provisioned bundle
 On-device readiness: 7 of 7 checkable preconditions satisfied, including Secure
   Enclave P-256 key creation, which cannot pass in a simulator or unsigned build
 Installed Codex: codex-cli 0.146.0 — the single version phase1 policy supports

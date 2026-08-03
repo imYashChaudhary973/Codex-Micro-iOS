@@ -81,13 +81,33 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
     // to bind when Codex is unsupported, through its own prerequisite probe.
     // Coupling the whole composition to the runtime attaching meant one
     // failure disabled three unrelated things.
+    // Startup outcomes go to unified logging as well as the menu.
+    //
+    // A menu line can only be read by someone standing at the machine with a
+    // screenshot, which is exactly the wrong tool for diagnosing why a bridge
+    // will not come up. The code written here is the same closed vocabulary
+    // the menu shows, so this adds a channel, not a disclosure.
+    let log = OSLogSink()
+    func record(_ code: String, level: BridgeLogLevel) {
+      log.write(RedactedLogEntry(timestamp: Date(), level: level, code: code, counts: [:]))
+      // Also to standard error. Unified logging is the right channel for a
+      // shipped app, but it is awkward to read from a terminal and drops
+      // info-level entries unless they are explicitly enabled — which makes
+      // it useless for the one case that matters most, a bridge that will not
+      // start. The code is the same closed vocabulary either way.
+      FileHandle.standardError.write(Data("codex-micro: \(code)\n".utf8))
+    }
+
     let assembly: CodexBridgeAssembly?
     do {
       assembly = try CodexBridgeAssembly.live()
+      record("startup.runtime.ready", level: .info)
     } catch {
       assembly = nil
+      let reason = BridgeStartupReason.describe(error)
+      record("startup.runtime.failed.\(reason)", level: .error)
       Task { @MainActor in
-        model.markUnavailable(reason: BridgeStartupReason.describe(error))
+        model.markUnavailable(reason: reason)
       }
     }
     self.assembly = assembly
@@ -108,11 +128,23 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
           )
         )
         model.attachLive(live)
+        record("startup.network.ready", level: .info)
+        // The acceptance path runs only when the operator asks for it, and
+        // exits when it is done so a run cannot be mistaken for a session.
+        if BridgeAcceptanceRun.isRequested {
+          Task {
+            let passed = await BridgeAcceptanceRun.run(live)
+            await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
+            exit(passed ? 0 : 1)
+          }
+        }
       } catch {
         // A bridge that cannot build its network graph still runs as a local
         // status menu; it simply offers no LAN and no pairing. The reason is
         // shown, because "unavailable" with no cause is undiagnosable.
-        model.markNetworkUnavailable(reason: BridgeStartupReason.describe(error))
+        let reason = BridgeStartupReason.describe(error)
+        record("startup.network.failed.\(reason)", level: .error)
+        model.markNetworkUnavailable(reason: reason)
       }
     }
 
