@@ -144,6 +144,33 @@ public actor PersistentCommandLedger {
     return .accepted(record)
   }
 
+  public func claim(
+    deviceID: UUID,
+    commandID: UUID,
+    kind: CompanionCommandKind,
+    semanticDigest: String,
+    at date: Date = Date()
+  ) throws -> NetworkCommandClaim {
+    if let existing = records[commandID] {
+      guard existing.deviceID == deviceID, existing.requestDigest == semanticDigest else {
+        throw CommandLedgerError.commandIDCollision
+      }
+      return .known(existing)
+    }
+    let record = CommandLedgerRecord(
+      commandID: commandID,
+      deviceID: deviceID,
+      commandKind: kind,
+      requestDigest: semanticDigest,
+      state: .submitting,
+      createdAt: date,
+      updatedAt: date
+    )
+    try storage.save(record)
+    records[commandID] = record
+    return .claimed(record)
+  }
+
   public func markSubmitted(
     commandID: UUID,
     threadID: String? = nil,
