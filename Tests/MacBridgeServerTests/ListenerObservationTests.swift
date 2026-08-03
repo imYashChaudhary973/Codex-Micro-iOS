@@ -121,10 +121,10 @@ final class ListenerObservationTests: XCTestCase {
     await world.observation.setSubscribeResult(.success(batch))
 
     try await world.authenticate()
-    try world.sendSubscribe()
+    try await world.sendSubscribe()
     await world.settle()
 
-    let delivery = try world.readDelivery()
+    let delivery = try await world.readDelivery()
     XCTAssertEqual(delivery.kind, .snapshot)
     XCTAssertEqual(delivery.subscriptionID, subscriptionID)
     XCTAssertEqual(delivery.cursor.sequence, 0)
@@ -144,13 +144,13 @@ final class ListenerObservationTests: XCTestCase {
         payload: .events(try eventsPayload()), cursor: try cursor(sequence: 2)))
 
     try await world.authenticate()
-    try world.sendSubscribe()
+    try await world.sendSubscribe()
     await world.settle()
-    _ = try world.readDelivery()
-    try world.sendAcknowledge(cursor: try cursor(sequence: 0))
+    _ = try await world.readDelivery()
+    try await world.sendAcknowledge(cursor: try cursor(sequence: 0))
     await world.settle()
 
-    let delivery = try world.readDelivery()
+    let delivery = try await world.readDelivery()
     XCTAssertEqual(delivery.kind, .event)
     XCTAssertEqual(delivery.cursor.sequence, 2)
     let acknowledged = await world.observation.acknowledgements
@@ -165,13 +165,14 @@ final class ListenerObservationTests: XCTestCase {
           payload: .snapshot(try snapshotPayload()), cursor: try cursor(sequence: 0))))
 
     try await world.authenticate()
-    try world.sendSubscribe()
+    try await world.sendSubscribe()
     await world.settle()
-    _ = try world.readDelivery()
-    try world.sendAcknowledge(cursor: try cursor(sequence: 0))
+    _ = try await world.readDelivery()
+    try await world.sendAcknowledge(cursor: try cursor(sequence: 0))
     await world.settle()
 
-    XCTAssertNil(try world.readOutboundBytes())
+    let outbound = try await world.readOutboundBytes()
+    XCTAssertNil(outbound)
   }
 
   // MARK: - Closed failures
@@ -180,24 +181,26 @@ final class ListenerObservationTests: XCTestCase {
     let world = try await World(deviceID: deviceID, connectionID: connectionID)
 
     try await world.authenticate()
-    try world.send(kind: .observationDelivery, body: Data(#"{}"#.utf8))
+    try await world.send(kind: .observationDelivery, body: Data(#"{}"#.utf8))
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .protocolViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .protocolViolation)
   }
 
   func testATamperedSealedFrameClosesTheConnection() async throws {
     let world = try await World(deviceID: deviceID, connectionID: connectionID)
 
     try await world.authenticate()
-    try world.sendRawSealed { sealed in
+    try await world.sendRawSealed { sealed in
       var tampered = sealed
       tampered[tampered.count - 1] ^= 0xFF
       return tampered
     }
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .counterViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .counterViolation)
   }
 
   func testAReplayedSealedFrameClosesTheConnection() async throws {
@@ -209,13 +212,14 @@ final class ListenerObservationTests: XCTestCase {
 
     try await world.authenticate()
     let first = try world.sealSubscribe()
-    world.writeInbound(first)
+    await world.writeInbound(first)
     await world.settle()
-    _ = try world.readDelivery()
-    world.writeInbound(first)
+    _ = try await world.readDelivery()
+    await world.writeInbound(first)
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .counterViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .counterViolation)
   }
 
   func testASeamRefusalClosesWithItsOwnPostAuthenticationReason() async throws {
@@ -229,10 +233,11 @@ final class ListenerObservationTests: XCTestCase {
       await world.observation.setSubscribeResult(.failure(refusal))
 
       try await world.authenticate()
-      try world.sendSubscribe()
+      try await world.sendSubscribe()
       await world.settle()
 
-      XCTAssertEqual(try world.readCloseReason(), expected, "\(refusal)")
+      let reason = try await world.readCloseReason()
+      XCTAssertEqual(reason, expected, "\(refusal)")
     }
   }
 
@@ -246,7 +251,8 @@ final class ListenerObservationTests: XCTestCase {
     try await world.authenticate()
     await world.settle()
 
-    XCTAssertNil(try world.readOutboundBytes())
+    let outbound = try await world.readOutboundBytes()
+    XCTAssertNil(outbound)
     XCTAssertTrue(world.channel.isActive)
   }
 
@@ -259,20 +265,22 @@ final class ListenerObservationTests: XCTestCase {
 
     try await world.authenticate()
     await world.settle()
-    world.writeInbound(Data(repeating: 0x01, count: 64))
+    await world.writeInbound(Data(repeating: 0x01, count: 64))
     await world.settle()
 
-    XCTAssertNil(try world.readOutboundBytes())
+    let outbound = try await world.readOutboundBytes()
+    XCTAssertNil(outbound)
     XCTAssertFalse(world.channel.isActive)
   }
 
   func testNothingIsWrittenBeforeAuthentication() async throws {
     let world = try await World(deviceID: deviceID, connectionID: connectionID)
 
-    world.writeInbound(Data(repeating: 0x01, count: 32))
+    await world.writeInbound(Data(repeating: 0x01, count: 32))
     await world.settle()
 
-    XCTAssertNil(try world.readOutboundBytes())
+    let outbound = try await world.readOutboundBytes()
+    XCTAssertNil(outbound)
   }
 
   // MARK: - Fixtures
@@ -333,7 +341,7 @@ final class ListenerObservationTests: XCTestCase {
   /// One embedded authenticated connection plus the device-side codecs, so a
   /// test can seal exactly what a real device would.
   private final class World {
-    let channel: EmbeddedChannel
+    let channel: NIOAsyncTestingChannel
     let observation = FakeListenerObservationHandler()
     let registry = ListenerSessionFrameRegistry()
     private var device: ListenerSessionFrames
@@ -367,8 +375,8 @@ final class ListenerObservationTests: XCTestCase {
         outbound: try SecureFrameSealer(
           key: clientKey, connectionID: sessionID, direction: .clientToServer)
       )
-      channel = EmbeddedChannel()
-      try channel.pipeline.syncOperations.addHandler(
+      channel = NIOAsyncTestingChannel()
+      try await channel.pipeline.addHandler(
         ListenerObservationHandler(
           connectionID: connectionID,
           observation: observation,
@@ -376,14 +384,17 @@ final class ListenerObservationTests: XCTestCase {
           logger: DiscardingListenerLogger()
         )
       )
-      try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0)).wait()
+      try await channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0))
     }
 
     func authenticate() async throws {
       if storeFrames {
         await registry.store(hostFrames, connectionID: connectionID)
       }
-      channel.pipeline.fireUserInboundEventTriggered(ListenerConnectionAuthenticated())
+      let pipeline = channel.pipeline
+      try await channel.testingEventLoop.executeInContext {
+        pipeline.fireUserInboundEventTriggered(ListenerConnectionAuthenticated())
+      }
       await settle()
     }
 
@@ -393,17 +404,23 @@ final class ListenerObservationTests: XCTestCase {
     /// `eventLoop.execute`, so a fixed number of yields is not by itself a
     /// guarantee. The loop therefore keeps spinning until the channel has
     /// produced output or gone inactive, and only then stops.
+    /// Drains the testing loop and any awaiting Tasks.
+    ///
+    /// The handler hands work to a `Task` and hops back through
+    /// `eventLoop.execute`, so both have to be driven. `NIOAsyncTestingChannel`
+    /// is used rather than `EmbeddedChannel` precisely because its loop is
+    /// safe to drive from whichever thread resumes after an `await`.
     func settle() async {
-      for _ in 0..<400 {
+      for _ in 0..<64 {
         await Task.yield()
-        channel.embeddedEventLoop.run()
+        await channel.testingEventLoop.run()
       }
     }
 
-    func writeInbound(_ bytes: Data) {
+    func writeInbound(_ bytes: Data) async {
       var buffer = channel.allocator.buffer(capacity: bytes.count)
       buffer.writeBytes(bytes)
-      _ = try? channel.writeInbound(buffer)
+      _ = try? await channel.writeInbound(buffer)
     }
 
     func sealSubscribe() throws -> Data {
@@ -412,23 +429,23 @@ final class ListenerObservationTests: XCTestCase {
       return try seal(kind: .observationSubscribe, body: try JSONEncoder().encode(message))
     }
 
-    func sendSubscribe() throws {
-      writeInbound(try sealSubscribe())
+    func sendSubscribe() async throws {
+      await writeInbound(try sealSubscribe())
     }
 
-    func sendAcknowledge(cursor: ReplayCursorEnvelope) throws {
+    func sendAcknowledge(cursor: ReplayCursorEnvelope) async throws {
       let message = SecureObservationAcknowledgement(
         subscriptionID: subscriptionID, cursor: cursor)
-      writeInbound(
+      await writeInbound(
         try seal(kind: .observationAcknowledge, body: try JSONEncoder().encode(message)))
     }
 
-    func send(kind: ListenerApplicationKind, body: Data) throws {
-      writeInbound(try seal(kind: kind, body: body))
+    func send(kind: ListenerApplicationKind, body: Data) async throws {
+      await writeInbound(try seal(kind: kind, body: body))
     }
 
-    func sendRawSealed(_ transform: (Data) -> Data) throws {
-      writeInbound(transform(try sealSubscribe()))
+    func sendRawSealed(_ transform: (Data) -> Data) async throws {
+      await writeInbound(transform(try sealSubscribe()))
     }
 
     func seal(kind: ListenerApplicationKind, body: Data) throws -> Data {
@@ -436,25 +453,28 @@ final class ListenerObservationTests: XCTestCase {
       return try device.outbound.seal(try envelope.encoded())
     }
 
-    func readOutboundBytes() throws -> Data? {
-      guard var buffer = try channel.readOutbound(as: ByteBuffer.self) else { return nil }
+    func readOutboundBytes() async throws -> Data? {
+      guard var buffer = try await channel.readOutbound(as: ByteBuffer.self) else { return nil }
       return buffer.readData(length: buffer.readableBytes)
     }
 
-    func readEnvelope() throws -> ListenerApplicationEnvelope? {
-      guard let bytes = try readOutboundBytes() else { return nil }
+    func readEnvelope() async throws -> ListenerApplicationEnvelope? {
+      guard let bytes = try await readOutboundBytes() else { return nil }
       let plaintext = try device.inbound.open(bytes)
       return try ListenerApplicationEnvelope.decode(plaintext)
     }
 
-    func readDelivery() throws -> SecureObservationDelivery {
-      let envelope = try XCTUnwrap(try readEnvelope())
+    func readDelivery() async throws -> SecureObservationDelivery {
+      let decoded = try await readEnvelope()
+      let envelope = try XCTUnwrap(decoded)
       XCTAssertEqual(envelope.kind, .observationDelivery)
       return try JSONDecoder().decode(SecureObservationDelivery.self, from: envelope.payload)
     }
 
-    func readCloseReason() throws -> SecureCloseReason? {
-      guard let envelope = try readEnvelope(), envelope.kind == .closeNotice else { return nil }
+    func readCloseReason() async throws -> SecureCloseReason? {
+      guard let envelope = try await readEnvelope(), envelope.kind == .closeNotice else {
+        return nil
+      }
       return try JSONDecoder().decode(SecureCloseNotice.self, from: envelope.payload).reason
     }
   }
