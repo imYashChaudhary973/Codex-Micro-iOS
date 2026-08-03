@@ -31,6 +31,93 @@ public enum BridgeAcceptanceRun {
     ProcessInfo.processInfo.environment[environmentKey] == "1"
   }
 
+  /// Set to `1` to bind, advertise, publish a pairing code, and then wait for
+  /// a real device to pair — instead of pairing against an in-process one.
+  public static let deviceWaitKey = "CODEX_MICRO_ACCEPTANCE_AWAIT_DEVICE"
+
+  public static var awaitsRealDevice: Bool {
+    ProcessInfo.processInfo.environment[deviceWaitKey] == "1"
+  }
+
+  /// Brings the bridge up, publishes a pairing code, and waits for a real
+  /// device to complete pairing.
+  ///
+  /// The phrase is printed rather than compared in-process, because with a
+  /// real device the two phrases are derived on two machines from two
+  /// independently reconstructed transcripts — which is the whole point. They
+  /// are compared by reading both runs' output, which is what a user does with
+  /// their eyes.
+  @discardableResult
+  public static func awaitDevicePairing(
+    _ live: BridgeLiveComposition,
+    timeout: Duration = .seconds(120)
+  ) async -> Bool {
+    report("start", "awaiting a real device")
+    await preflight(live)
+
+    let endpoint: ListenerEndpoint
+    do {
+      endpoint = try await live.lanController.enable()
+    } catch {
+      report("lan.failed", "\(error)")
+      return false
+    }
+    let advertising = await live.lanController.isAdvertising()
+    report("lan.enabled", "host=\(endpoint.host) port=\(endpoint.port) advertising=\(advertising)")
+    let controller = live.lanController
+    defer { Task { try? await controller.disable() } }
+
+    let payload: PairingQRPayload
+    do {
+      payload = try await live.pairing.beginPairing(
+        endpoint: endpoint,
+        selection: try SecureProtocolSelection(major: 1, minor: 1, features: [.observeSync])
+      )
+    } catch {
+      report("pairing.sessionFailed", "\(error)")
+      return false
+    }
+    // The exact text a scanned QR would yield, so a device can be driven with
+    // it directly and the transport is exercised identically either way.
+    report("pairing.code", BridgePairingQR.text(for: payload))
+
+    let model = live.pairingModel
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    var confirmed = false
+    while ContinuousClock.now < deadline {
+      let state = await MainActor.run { model.state }
+      switch state {
+      case .awaitingPhrase(_, let phrase):
+        if !confirmed {
+          report("phrase.mac", phrase.displayWords.joined(separator: " "))
+          await live.pairing.confirmDisplayedPhrase()
+          confirmed = true
+          report("phrase.macConfirmed")
+        }
+      case .paired(let deviceID):
+        if let grant = try? await live.authority.authoritativeGrant(deviceID: deviceID) {
+          report(
+            "grant.stored",
+            "capabilities=\(grant.capabilities.map(\.rawValue).sorted().joined(separator: ","))"
+              + " projects=\(grant.permittedProjectIDs.count)"
+              + " ceiling=\(grant.actionProfileCeiling.rawValue)")
+          report("PASS", "a real device paired over Wi-Fi and the grant is stored")
+          return true
+        }
+        report("grant.missing", "device paired but no grant was written")
+        return false
+      case .failed(let reason):
+        report("pairing.failed", reason)
+        return false
+      case .idle, .awaitingScan, .awaitingDevice:
+        break
+      }
+      try? await Task.sleep(for: .milliseconds(200))
+    }
+    report("timeout", "no device completed pairing")
+    return false
+  }
+
   /// Every step, in order, with its outcome. Written to standard error so a
   /// run is readable without a screenshot and diffable between attempts.
   static func report(_ step: String, _ detail: String = "") {

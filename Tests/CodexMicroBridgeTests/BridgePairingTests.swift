@@ -322,3 +322,22 @@ private final class InMemoryIdentityBackend: SecureIdentityBackend {
 
   func withExclusiveCreation<T>(_ body: () throws -> T) rethrows -> T { try body() }
 }
+
+/// The exact upgrade values the phone must send.
+///
+/// `PairingClient` on iOS cannot import `MacBridgeServer`, so it restates the
+/// path, `Origin`, and subprotocol as its own literals. A divergence is not a
+/// cosmetic mismatch: the listener refuses the upgrade before reading a single
+/// pairing byte, and the phone sees a connection that simply closes — which is
+/// indistinguishable from a network problem and is exactly how the first
+/// real-device run failed.
+///
+/// These assertions are the second, independent statement of each constant, so
+/// a change on either side fails here rather than on a phone.
+final class PhoneUpgradeContractTests: XCTestCase {
+  func testTheUpgradePathOriginAndSubprotocolAreWhatThePhoneSends() {
+    XCTAssertEqual(ListenerUpgradePolicy.path, "/codex-micro/bridge/v1")
+    XCTAssertEqual(ListenerUpgradePolicy.origin, "https://codex-micro-bridge.invalid")
+    XCTAssertEqual(ListenerUpgradePolicy.subprotocol, "codex-micro.bridge.v1")
+  }
+}

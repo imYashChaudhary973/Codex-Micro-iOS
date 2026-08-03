@@ -25,6 +25,14 @@ struct CodexMicroAcceptanceApp: App {
         AcceptanceView()
           .tabItem { Label("Matrix", systemImage: "checklist") }
       }
+      .task {
+        // An acceptance run supplies the pairing code at launch so the run is
+        // reproducible and its output readable. Absent the variable this does
+        // nothing and the camera is the only path.
+        if let code = PhoneAcceptanceRun.suppliedCode {
+          await PhoneAcceptanceRun.run(code: code, model: pairing)
+        }
+      }
     }
   }
 }
