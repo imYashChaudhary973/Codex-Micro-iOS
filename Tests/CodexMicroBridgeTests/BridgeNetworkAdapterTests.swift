@@ -24,7 +24,7 @@ final class BridgeNetworkAdapterTests: XCTestCase {
   func testALiveGrantBecomesALiveSnapshotCarryingTheAuthorityCounters() async throws {
     let world = try await World()
 
-    let snapshot = try await XCTUnwrapAsync(
+    let snapshot = try await unwrapAsync(
       try await world.sessionAuthority.authoritySnapshot(deviceID: deviceID))
 
     XCTAssertEqual(snapshot.deviceID, deviceID)
@@ -56,7 +56,7 @@ final class BridgeNetworkAdapterTests: XCTestCase {
         _ = try await world.authority.expire(deviceID: deviceID)
       }
 
-      let snapshot = try await XCTUnwrapAsync(
+      let snapshot = try await unwrapAsync(
         try await world.sessionAuthority.authoritySnapshot(deviceID: deviceID))
 
       XCTAssertEqual(snapshot.liveness, expected)
@@ -91,7 +91,7 @@ final class BridgeNetworkAdapterTests: XCTestCase {
   func testTheSnapshotCarriesAKeyTheCoordinatorCanValidate() async throws {
     let world = try await World()
 
-    let snapshot = try await XCTUnwrapAsync(
+    let snapshot = try await unwrapAsync(
       try await world.sessionAuthority.authoritySnapshot(deviceID: deviceID))
 
     // `SessionAuthoritySnapshot.init` rejects a key that is not a valid
@@ -396,7 +396,7 @@ func assertThrowsErrorAsync<T>(
   }
 }
 
-func XCTUnwrapAsync<T>(
+func unwrapAsync<T>(
   _ expression: @autoclosure () async throws -> T?,
   file: StaticString = #filePath,
   line: UInt = #line
