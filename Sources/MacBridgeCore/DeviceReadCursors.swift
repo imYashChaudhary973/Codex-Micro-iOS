@@ -254,6 +254,16 @@ public actor DeviceReadCursorStore {
     return deviceCursors.count - retained.count
   }
 
+  /// How many positions a device holds, ignoring scope.
+  ///
+  /// This is purge accounting for the authorization-change path, not a
+  /// disclosure: it returns a count, never a thread identifier, and it is
+  /// used only after a change that ends the device's access — at which point
+  /// there is no scope left to filter against.
+  public func storedThreadCount(deviceID: UUID) -> Int {
+    state.cursors[deviceID]?.count ?? 0
+  }
+
   /// The monotonic write sequence, for anti-rollback assertions in tests.
   public func writeSequence() -> UInt64 {
     state.writeSequence
