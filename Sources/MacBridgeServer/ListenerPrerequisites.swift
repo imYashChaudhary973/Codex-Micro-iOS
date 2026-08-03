@@ -142,13 +142,39 @@ public struct ListenerPrerequisites: Sendable {
   }
 }
 
+/// Evidence that the Mac user asked for LAN access during this process.
+///
+/// The listener is off by default and nothing persists an enablement, so a
+/// restarted bridge always comes up disabled (plan §2 invariant 2, §7
+/// gate 1). Until Step 2.14 the *only* enabled configuration came from
+/// ``ListenerConfiguration/testOnlyEnabled(binding:interfacePolicy:ceilings:handshake:logger:now:)``,
+/// which meant the shipping app had no route to a bound socket at all.
+///
+/// This type closes that gap without weakening the default. An enabled
+/// configuration cannot be spelled by accident because it requires a value
+/// only ``userRequested()`` produces: the type has no public initializer, no
+/// `Codable` conformance, and no stored state, so it cannot be decoded from
+/// a preference, restored from disk, or forged by a caller that merely
+/// wants the listener up.
+public struct ListenerEnablement: Sendable {
+  /// Minted by the LAN control when the user turns LAN access on.
+  ///
+  /// Call sites are auditable precisely because this is the only way to
+  /// make one: grep for `userRequested` and every production enable is in
+  /// front of you.
+  public static func userRequested() -> ListenerEnablement { ListenerEnablement() }
+
+  private init() {}
+}
+
 /// Listener configuration.
 ///
 /// The listener is **off by default** (plan §2 invariant 2, §7 gate 1).
-/// ``testOnlyEnabled(binding:ceilings:handshake:logger:now:)`` is the only
-/// factory that produces an enabled configuration, and it exists solely for
-/// deterministic and loopback tests. No user-facing enable control exists in
-/// this step; Step 2.13 owns it.
+/// Two factories produce an enabled configuration and no others exist:
+/// ``enabled(by:binding:interfacePolicy:ceilings:handshake:logger:now:)``,
+/// which demands a ``ListenerEnablement`` the user's own action minted, and
+/// ``testOnlyEnabled(binding:interfacePolicy:ceilings:handshake:logger:now:)``
+/// for deterministic and loopback tests.
 public struct ListenerConfiguration: Sendable {
   /// Whether the listener may bind at all.
   public let isEnabled: Bool
@@ -160,6 +186,20 @@ public struct ListenerConfiguration: Sendable {
   public let ceilings: ListenerCeilings
   /// The pairing/authentication seam.
   public let handshake: any ListenerHandshakeHandling
+  /// The scoped-observation seam (Step 2.8).
+  ///
+  /// Defaults to the denying handler on every factory, so a listener built
+  /// without one serves nothing rather than serving unfiltered state.
+  public let observation: any ListenerObservationHandling
+  /// The command seam (Step 2.9). Denying by default, for the same reason.
+  public let commands: any ListenerCommandHandling
+  /// Where an authenticated connection claims its directional codecs.
+  ///
+  /// This must be the *same* registry the handshake handler writes into —
+  /// ``CoordinatorListenerHandshakeHandler/frameRegistry`` — or an
+  /// authenticated connection finds no codecs and can open no application
+  /// message.
+  public let frameProvider: any ListenerSessionFrameProviding
   /// Closed-code logger.
   public let logger: any ListenerLogging
   /// Monotonic nanosecond seam for every rate window.
@@ -175,18 +215,60 @@ public struct ListenerConfiguration: Sendable {
       interfacePolicy: ListenerInterfacePolicy(),
       ceilings: ListenerCeilings(),
       handshake: DenyingListenerHandshakeHandler(),
+      observation: DenyingListenerObservationHandler(),
+      commands: DenyingListenerCommandHandler(),
+      frameProvider: DenyingListenerSessionFrameProvider(),
       logger: DiscardingListenerLogger(),
       now: ListenerMonotonicClock.system
     )
   }
 
-  /// The only enabled configuration factory. Internal test configuration
-  /// only; there is no user-accessible path to it in Step 2.7.
+  /// The production enabled configuration.
+  ///
+  /// `enablement` is unused as a value and that is deliberate: it exists to
+  /// make the *type* of this call site unforgeable. Requiring it means an
+  /// enabled listener can only be built where a user action was taken, and
+  /// the compiler enforces that rather than a comment.
+  ///
+  /// The interface policy defaults to the strict one — loopback is refused,
+  /// so a production bridge binds a real LAN interface or nothing.
+  public static func enabled(
+    by enablement: ListenerEnablement,
+    binding: ListenerInterfaceBinding,
+    interfacePolicy: ListenerInterfacePolicy = ListenerInterfacePolicy(),
+    ceilings: ListenerCeilings = ListenerCeilings(),
+    handshake: any ListenerHandshakeHandling,
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
+    logger: any ListenerLogging = DiscardingListenerLogger(),
+    now: @escaping @Sendable () -> UInt64 = ListenerMonotonicClock.system
+  ) -> ListenerConfiguration {
+    _ = enablement
+    return ListenerConfiguration(
+      isEnabled: true,
+      binding: binding,
+      interfacePolicy: interfacePolicy,
+      ceilings: ceilings,
+      handshake: handshake,
+      observation: observation,
+      commands: commands,
+      frameProvider: frameProvider,
+      logger: logger,
+      now: now
+    )
+  }
+
+  /// The test-only enabled configuration, which defaults to permitting a
+  /// loopback bind so deterministic tests need no LAN.
   public static func testOnlyEnabled(
     binding: ListenerInterfaceBinding,
     interfacePolicy: ListenerInterfacePolicy = ListenerInterfacePolicy(allowLoopbackForTests: true),
     ceilings: ListenerCeilings = ListenerCeilings(),
     handshake: any ListenerHandshakeHandling = DenyingListenerHandshakeHandler(),
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     logger: any ListenerLogging = DiscardingListenerLogger(),
     now: @escaping @Sendable () -> UInt64 = ListenerMonotonicClock.system
   ) -> ListenerConfiguration {
@@ -196,6 +278,9 @@ public struct ListenerConfiguration: Sendable {
       interfacePolicy: interfacePolicy,
       ceilings: ceilings,
       handshake: handshake,
+      observation: observation,
+      commands: commands,
+      frameProvider: frameProvider,
       logger: logger,
       now: now
     )
@@ -207,6 +292,9 @@ public struct ListenerConfiguration: Sendable {
     interfacePolicy: ListenerInterfacePolicy,
     ceilings: ListenerCeilings,
     handshake: any ListenerHandshakeHandling,
+    observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling,
+    frameProvider: any ListenerSessionFrameProviding,
     logger: any ListenerLogging,
     now: @escaping @Sendable () -> UInt64
   ) {
@@ -215,6 +303,9 @@ public struct ListenerConfiguration: Sendable {
     self.interfacePolicy = interfacePolicy
     self.ceilings = ceilings
     self.handshake = handshake
+    self.observation = observation
+    self.commands = commands
+    self.frameProvider = frameProvider
     self.logger = logger
     self.now = now
   }
