@@ -112,12 +112,24 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
   /// deliberately carries **no** sandbox, approval, root, or network field:
   /// a steered turn keeps the policy it was started under, so steering can
   /// never widen it.
+  ///
+  /// **The field is `expectedTurnId`, not `turnId`.** Step 2.11 wrote this
+  /// call from the documented architecture and recorded that it was proven
+  /// nowhere; the Step 2.14 live probe found Codex 0.146.0 rejecting it with
+  /// `missing field expectedTurnId`. Every steer would have failed.
+  ///
+  /// The name is not a spelling detail. `expectedTurnId` makes the call a
+  /// compare-and-swap: Codex refuses the steer unless that turn is still the
+  /// thread's current one. Steering a turn that already finished, or one
+  /// replaced by a newer turn, is therefore refused by Codex itself rather
+  /// than silently applying to whatever is running now — which is the
+  /// stronger guarantee, and one the bridge gets for free.
   public func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
     _ = try await client.request(
       method: "turn/steer",
       params: .object([
         "threadId": .string(threadID),
-        "turnId": .string(turnID),
+        "expectedTurnId": .string(turnID),
         "input": .array([
           .object(["type": .string("text"), "text": .string(prompt)])
         ]),
