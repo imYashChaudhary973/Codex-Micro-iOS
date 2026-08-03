@@ -143,7 +143,7 @@ public actor BridgeSweepScheduler {
   public func start() {
     guard task == nil else { return }
     task = Task { [weak self] in
-      guard let interval = await self?.interval else { return }
+      guard let interval = self?.interval else { return }
       while !Task.isCancelled {
         try? await Task.sleep(for: interval)
         guard !Task.isCancelled else { return }

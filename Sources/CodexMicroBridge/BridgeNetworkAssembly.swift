@@ -91,7 +91,8 @@ public actor BridgeSecureEnclaveTLSProvider: ListenerTLSIdentityProviding {
         identity: identity, currentDate: now)
       // First issuance records the anti-rollback baseline. A pre-existing
       // baseline belongs to an earlier run of this same key and must survive.
-      try? rotation?.initializeBaseline(currentSPKIFingerprint: certificate.spkiFingerprint)
+      _ = try? rotation?.initializeBaseline(
+        currentSPKIFingerprint: certificate.spkiFingerprint)
     }
 
     issued = certificate
@@ -213,6 +214,13 @@ public struct BridgeNetworkAssembly: Sendable {
   public let ceilings: ListenerCeilings
   /// Closed-code logger.
   public let logger: any ListenerLogging
+  /// Where the verification phrase and the completed proposal go.
+  ///
+  /// Defaults to discarding both, which is correct only for a listener with
+  /// no pairing UI. A production assembly supplies
+  /// ``BridgePairingObserver``; without it a completed pairing produces no
+  /// grant and the phrase is never shown.
+  public let pairingObserver: any ListenerPairingObserving
 
   public init(
     authority: DeviceGrantAuthority,
@@ -223,7 +231,8 @@ public struct BridgeNetworkAssembly: Sendable {
     tls: BridgeSecureEnclaveTLSProvider,
     codexProbe: BridgeCodexSupportProbe,
     ceilings: ListenerCeilings = ListenerCeilings(),
-    logger: any ListenerLogging = DiscardingListenerLogger()
+    logger: any ListenerLogging = DiscardingListenerLogger(),
+    pairingObserver: any ListenerPairingObserving = DiscardingListenerPairingObserver()
   ) {
     self.authority = authority
     self.sessions = sessions
@@ -236,6 +245,7 @@ public struct BridgeNetworkAssembly: Sendable {
     self.codexProbe = codexProbe
     self.ceilings = ceilings
     self.logger = logger
+    self.pairingObserver = pairingObserver
   }
 
   /// Builds one complete, enabled listener over a validated LAN binding.
@@ -259,7 +269,8 @@ public struct BridgeNetworkAssembly: Sendable {
     let handshake = CoordinatorListenerHandshakeHandler(
       pairing: pairing,
       session: sessions,
-      frames: ListenerSessionFrameRegistry()
+      frames: ListenerSessionFrameRegistry(),
+      observer: pairingObserver
     )
     return ListenerConfiguration.enabled(
       by: enablement,
