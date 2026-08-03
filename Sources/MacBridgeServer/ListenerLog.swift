@@ -60,6 +60,14 @@ public enum ListenerLogCode: String, CaseIterable, Sendable {
   /// An unauthenticated connection was closed for holding its slot without
   /// sending an allowlisted handshake message.
   case unauthenticatedSilenceElapsed = "unauthenticated_silence_elapsed"
+  /// The static Bonjour record was published after listener readiness.
+  case bonjourPublished = "bonjour_published"
+  /// Publication failed; the listener was rolled back.
+  case bonjourPublishFailed = "bonjour_publish_failed"
+  /// The record was removed before the listener closed.
+  case bonjourRemoved = "bonjour_removed"
+  /// Removal could not be confirmed; the record may still be visible.
+  case bonjourRemoveFailed = "bonjour_remove_failed"
   /// A handshake message was refused by its per-source ceiling.
   case handshakeRateExceeded = "handshake_rate_exceeded"
   /// A peer exceeded the pre-upgrade byte budget.
