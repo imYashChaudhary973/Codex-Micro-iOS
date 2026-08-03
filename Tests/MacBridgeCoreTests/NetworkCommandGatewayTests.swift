@@ -211,6 +211,36 @@ final class NetworkCommandGatewayTests: XCTestCase {
     )
   }
 
+  /// Step 2.12 was closed by a recorded product decision: v1 is
+  /// read/respond/control-only and the phone may not create threads.
+  ///
+  /// This test is the enforcement of that decision, not a restatement of it.
+  /// `startThread` must stay off the allowlist and must stay denied for a
+  /// grant that carries the `.startThread` capability and every profile —
+  /// so adding it back requires deliberately deleting this test, which is
+  /// exactly the moment the decision should be revisited.
+  func testStartThreadStaysClosedByTheRecordedStepTwelveDeferral() async throws {
+    XCTAssertFalse(NetworkCommandGateway.allowedCommandKinds.contains(.startThread))
+
+    for profile in MobileActionProfile.allCases {
+      let world = try await World(
+        capabilities: Set(DeviceCapability.allCases), profile: profile)
+      let command = try ClientCommand(
+        commandID: UUID(),
+        issuedAt: World.now,
+        body: .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: [])
+      )
+
+      let outcome = await world.gateway.execute(command: command, context: world.context)
+
+      XCTAssertEqual(outcome, .denied(.unsupportedCommand), "\(profile)")
+      let record = await world.ledger.record(commandID: command.commandID)
+      XCTAssertNil(record, "a refused startThread must leave no ledger record")
+      let starts = await world.turnStarter.startCount
+      XCTAssertEqual(starts, 0)
+    }
+  }
+
   /// Both agent commands are on the allowlist but gated a second time by the
   /// grant. The Step 2.9 fixture's grant has no `.runAgent`, so they are
   /// still denied — just for the right reason.
@@ -596,6 +626,7 @@ final class NetworkCommandGatewayTests: XCTestCase {
     init(
       projects: Set<String> = ["project-a"],
       capabilities: Set<DeviceCapability> = [.view, .interrupt],
+      profile: MobileActionProfile = .observe,
       ledger: (any CommandLedgering)? = nil
     ) async throws {
       let sessionID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
@@ -604,7 +635,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
         deviceID: deviceID,
         devicePublicKey: P256.Signing.PrivateKey().publicKey.x963Representation,
         capabilities: capabilities,
-        permittedProjectIDs: projects
+        permittedProjectIDs: projects,
+        actionProfileCeiling: profile
       )
       table.attribute(threadID: "thread-a", projectID: "project-a")
       table.attribute(threadID: "thread-b", projectID: "project-b")
