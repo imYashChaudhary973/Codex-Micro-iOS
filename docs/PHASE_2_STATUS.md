@@ -704,6 +704,24 @@ Two cases pass:
 
 **This is loopback evidence, not physical-device proof.** It binds `127.0.0.1` and speaks to itself. No Bonjour record has been published and no phone has connected.
 
+### The signed Mac host, and three defects the first launch found
+
+Running the bridge as a signed `.app` for the first time exposed three problems that no test could have caught, because all three live in the composition and packaging that only exist at launch.
+
+**1. The network graph was gated on the Codex runtime.** `applicationDidFinishLaunching` returned early when `CodexBridgeAssembly.live()` threw, and the network composition was built after that return. So a Codex failure left LAN access and pairing **permanently disabled for an unrelated reason** — the menu showed `Codex unavailable` with both controls greyed. That is a category error: the listener already refuses to bind when Codex is unsupported, through its own prerequisite probe. The two are now built independently.
+
+**2. "Unavailable" carried no cause.** Nothing in the app or the system log said whether identity, Keychain, authority, policy, or Codex had refused, so the only way forward was to guess. `BridgeStartupReason` now maps a startup failure onto a short closed reason drawn from existing enums — `identity.missing`, `authority.…`, `codex.unsupported`. Nothing interpolates a path, address, identifier, or system error string, so a screenshot of the menu still carries nothing (plan §2 invariant 19).
+
+**3. The Data Protection Keychain needs an entitlement, and the entitlement needs a profile.** With the reason visible, the failure named itself: `identity.claimStore`. The identity store writes exclusively to the Data Protection Keychain (ADR §6, `kSecUseDataProtectionKeychain: true`), and on macOS that Keychain refuses every operation from code without a keychain access group, returning `errSecMissingEntitlement`. `BridgeIdentityError.entitlementMissing` is now distinct from `claimStoreFailure`, because the two need completely different fixes and collapsing them sends whoever reads it looking at the Keychain when the problem is packaging.
+
+Adding the entitlement to the `codesign` step **made the app stop launching entirely** — `NSPOSIXErrorDomain 163, "Launchd job spawn failed"`. macOS refuses to spawn a bundle carrying `keychain-access-groups` or `application-identifier` without a matching provisioning profile; `codesign` attaches the entitlement and the kernel rejects the process at exec. Both forms were tried.
+
+`MacHost/CodexMicroBridge.xcodeproj` is the fix: an Xcode target over the same `Sources/CodexMicroBridge` sources, with automatic signing. It mints and embeds a **Mac Team Provisioning Profile**, so the entitlement is valid and the app launches. Verified in the built bundle: `keychain-access-groups == [8QSM298XJ2.com.codexmicro.bridge]`, `embedded.provisionprofile` present, `LSUIElement` true, `NSBonjourServices == [_codexmicro._tcp]`.
+
+`Scripts/package-bridge.sh` remains for a quick unsigned smoke run and now says plainly that it cannot produce an entitled bundle and why.
+
+A fourth, smaller problem: the menu-bar item is unreachable on a Mac whose menu bar is full, because macOS silently drops overflow items rather than showing them. `CODEX_MICRO_SHOW_DOCK=1` opts into a Dock icon for the acceptance run. It is env-gated, so the menu-bar-only default from Step 2.13 is unchanged.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
@@ -756,7 +774,10 @@ Phase 2 production dependencies added: yes — the complete ADR §4 set, exactly
 Production Bonjour advertisement added: the record, its lifecycle, and the signed app's
   NSBonjourServices allowlist exist; the default publisher advertises nothing and no
   record has ever been published by this code
-Mac bridge packaged as a signed .app: yes — Scripts/package-bridge.sh, signed with the
+Mac bridge as a provisioned Xcode target: yes — MacHost/CodexMicroBridge.xcodeproj,
+  Mac Team Provisioning Profile embedded, keychain-access-groups valid, launches and
+  runs. This is the only build that can reach the Data Protection Keychain
+Mac bridge packaged by Scripts/package-bridge.sh: yes — Scripts/package-bridge.sh, signed with the
   development identity, NSBonjourServices and LSUIElement verified in the built bundle.
   No record has been published and no socket bound by this code
 Pairing wired on the Mac: yes — Enclave identity signs, the phrase reaches a screen, and
