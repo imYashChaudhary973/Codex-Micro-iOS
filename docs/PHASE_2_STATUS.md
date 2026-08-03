@@ -608,9 +608,22 @@ This is the specific thing a composition root is for. No unit test could have ca
 
 **13 new deterministic tests** (root suite total **964**, up from 951). Three of them assert the wiring directly: real handlers rather than denying ones, one shared frame registry, and a distinct registry per listener.
 
+### The signed acceptance host
+
+`AcceptanceHost/CodexMicroAcceptance.xcodeproj` is the minimal iOS app plan §3 reserves for this step. It supplies no protocol and makes no authorization decision; it links `CompanionProtocol` and `CompanionCrypto` from the local package and does three things.
+
+- **It proves the two shared targets link into a development-signed iOS app.** Signing succeeds against team `8QSM298XJ2` with an automatically provisioned profile; the bundle is `arm64`, minimum iOS 17.0, bundle identifier `com.codexmicro.acceptance`.
+- **It carries the local-network keys a real pairing needs.** `NSBonjourServices` allowlists exactly `_codexmicro._tcp` and a usage description is present, both verified in the *built* bundle rather than only in the source plist.
+- **It presents the acceptance matrix** — all eleven cases from plan §7 gate 13, each with the property it establishes and an ordered physical procedure.
+
+The matrix is a checklist, not a test suite. What the host checks on-device is each case's **offline precondition**, and the result vocabulary keeps three states apart on purpose: the precondition holds, the precondition fails, or the case has no offline precondition and is physical or nothing. A matrix that cannot distinguish "did not run" from "passed" launders the first into the second, which is exactly the failure a gate exists to prevent.
+
+Seven cases have a real precondition. The strongest is the Secure Enclave check: it creates a P-256 key with `kSecAttrIsPermanent: false` and discards it, which cannot pass in a simulator or an unsigned build, and which writes nothing — a probe that left a key behind would be indistinguishable from the identity the reinstall case exists to watch. The other four (`ipChange`, `foregroundBackgroundReauth`, `macRestart`, `keychainLockAndReboot`) are properties of a running system across a real disruption and report `physicalOnly` rather than inventing a check.
+
 ### What Step 2.14 still owes
 
-- The iOS acceptance host does not exist. There is no `.xcodeproj` and no app target, so nothing has been signed or installed.
+- **The app has not been installed on a device.** It is signed and provisioned; installation was not performed by this session.
+- **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
 - The pairing QR and phrase confirmation still have no UI.
@@ -629,6 +642,16 @@ Generic iOS device build (xcodebuild -scheme CompanionCrypto
   -destination "generic/platform=iOS"): BUILD SUCCEEDED against the iOS 27.0 SDK,
   arm64-apple-ios17.0. This was listed as outstanding required merge evidence from
   Step 2.2 through Step 2.13 and had never been run in this environment
+Acceptance host, unsigned (CODE_SIGNING_ALLOWED=NO): BUILD SUCCEEDED
+Acceptance host, development-signed (-allowProvisioningUpdates): BUILD SUCCEEDED
+  Signing identity: Apple Development: Yash Chaudhary (ZM9BCCGR5L)
+  Team: 8QSM298XJ2 (read from the certificate OU; the CN parenthetical is a
+    different identifier and is not the team)
+  Profile: automatically provisioned iOS Team Provisioning Profile
+  Built bundle: arm64, MinimumOSVersion 17.0, com.codexmicro.acceptance,
+    NSBonjourServices == [_codexmicro._tcp], usage description present
+App installed on a physical device: no
+Physical acceptance cases run: none — 0 of 11
 Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run since
 Phase 2 production listener added: yes — off by default. A production enabled
   configuration now exists and requires a ListenerEnablement that only an explicit
@@ -666,7 +689,9 @@ MacBridgeServer imports MacBridgeCore: no — the executor-bypass seam is intact
 Keychain, Secure Enclave, or key-storage code added: unchanged from Step 2.4a/2.4b;
   entitled positive paths are still not exercised by unit tests. Step 2.8's read-cursor
   state is a file, not a Keychain item, and holds no key material or authority
-Physical-device evidence: none
+Physical-device evidence: none. Two paired iPhones are present (iPhone 13 and
+  iPhone 11, both iOS 27.0) and the host is signed for them, but nothing has
+  been installed or run on either
 ```
 
 The counts above supersede the Step 2.7 block, which transposed the `MacBridgeCoreTests` and `CompanionCryptoTests` figures; the 633 total it reported was correct.
