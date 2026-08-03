@@ -120,6 +120,8 @@ public actor NetworkCommandGateway {
   private let ledger: any CommandLedgering
   private let sessions: any NetworkSessionVerifying
   private let runtime: any NetworkRuntimeReadiness
+  private let responder: any CodexApprovalResponding
+  private let readCursors: DeviceReadCursorStore
   private let hostProfile: MobileActionProfile
 
   public init(
@@ -128,6 +130,8 @@ public actor NetworkCommandGateway {
     ledger: any CommandLedgering,
     sessions: any NetworkSessionVerifying,
     runtime: any NetworkRuntimeReadiness,
+    responder: any CodexApprovalResponding,
+    readCursors: DeviceReadCursorStore,
     hostProfile: MobileActionProfile = .runWorkspace
   ) {
     self.authority = authority
@@ -135,6 +139,8 @@ public actor NetworkCommandGateway {
     self.ledger = ledger
     self.sessions = sessions
     self.runtime = runtime
+    self.responder = responder
+    self.readCursors = readCursors
     self.hostProfile = hostProfile
   }
 
@@ -316,17 +322,112 @@ public actor NetworkCommandGateway {
     }
   }
 
-  /// Executes an authorized new command. Step 2.9's first PR ships the
-  /// sequence with an empty execution allowlist; the two P0 commands land
-  /// with their own coverage.
+  /// Executes an authorized new command.
+  ///
+  /// The claim already exists, so every path from here **must** reach a
+  /// terminal ledger state: a record left claimed is crash-ambiguous and
+  /// resolves to `outcomeUnknown` on the device's next attempt.
   func perform(_ plan: ExecutionPlan, now: Date) async -> NetworkCommandOutcome {
+    switch plan.command.body {
+    case .markThreadRead(let threadID, let throughSequence):
+      return await performMarkThreadRead(
+        plan, threadID: threadID, throughSequence: throughSequence, now: now)
+    case .interruptTurn(let threadID, let turnID):
+      return await performInterrupt(plan, threadID: threadID, turnID: turnID, now: now)
+    case .selectThread, .startThread, .sendPrompt, .steerTurn, .resolveApproval:
+      // Unreachable: the allowlist refused these before the claim existed.
+      return await finish(
+        plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
+        outcome: { _ in .denied(.unsupportedCommand) })
+    }
+  }
+
+  /// Advances the device's own read cursor.
+  ///
+  /// It **never calls Codex**: the position is device-local UI state, so a
+  /// degraded runtime does not deny it and no external call is made under any
+  /// outcome. The store enforces device-own, scoped, and monotonic itself, so
+  /// a regressing or repeated position is a denial rather than a silent no-op
+  /// — a replayed command cannot quietly unread a thread.
+  private func performMarkThreadRead(
+    _ plan: ExecutionPlan,
+    threadID: String,
+    throughSequence: UInt64,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    do {
+      _ = try await readCursors.advance(
+        deviceID: plan.deviceID, threadID: threadID, to: throughSequence)
+    } catch let error as DeviceReadCursorError {
+      return await finish(
+        plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
+        outcome: { _ in .denied(Self.wireReason(for: error)) })
+    } catch {
+      return await finish(
+        plan, state: .failed, resultCode: .invalidRequest, now: now,
+        outcome: { .failed($0) })
+    }
+    return await finish(
+      plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
+  }
+
+  /// Interrupts exactly one turn, with **at most one** `turn/interrupt` call
+  /// across duplicates, retries, and reconnects.
+  ///
+  /// The single call is guaranteed by the claim, not by anything here: a
+  /// duplicate never reaches this method because the known-result read
+  /// returned first. The ledger is moved to `submitted` **before** the call so
+  /// a crash between them is ambiguous in the safe direction, and a transport
+  /// failure is terminal — automatic retries are disabled (invariant 13).
+  private func performInterrupt(
+    _ plan: ExecutionPlan,
+    threadID: String,
+    turnID: String,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    do {
+      try await ledger.markSubmitted(
+        commandID: plan.command.commandID,
+        threadID: threadID,
+        turnID: turnID,
+        requestID: nil,
+        at: now
+      )
+    } catch {
+      return await finish(
+        plan, state: .failed, resultCode: .invalidRequest, now: now, outcome: { .failed($0) })
+    }
+
+    do {
+      try await responder.interruptTurn(threadID: threadID, turnID: turnID)
+    } catch {
+      // The call may or may not have reached Codex. It is never retried; the
+      // user confirms the true outcome on the Mac.
+      try? await ledger.markOutcomeUnknown(
+        commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
+    return await finish(
+      plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
+  }
+
+  /// Moves the claim to a terminal state and returns the outcome built from
+  /// the persisted record. A ledger write failure here still yields a
+  /// terminal outcome to the device; the record is reconciled on restart.
+  private func finish(
+    _ plan: ExecutionPlan,
+    state: CommandLifecycleState,
+    resultCode: CommandResultCode,
+    now: Date,
+    outcome: (CommandLedgerRecord) -> NetworkCommandOutcome
+  ) async -> NetworkCommandOutcome {
     try? await ledger.finish(
-      commandID: plan.command.commandID,
-      state: .declined,
-      resultCode: .rejectedByPolicy,
-      at: now
-    )
-    return .denied(.unsupportedCommand)
+      commandID: plan.command.commandID, state: state, resultCode: resultCode, at: now)
+    return outcome(await currentRecord(plan, now: now))
+  }
+
+  private func currentRecord(_ plan: ExecutionPlan, now: Date) async -> CommandLedgerRecord {
+    await ledger.record(commandID: plan.command.commandID) ?? plan.record
   }
 
   // MARK: - Closed surfaces
@@ -385,6 +486,18 @@ public actor NetworkCommandGateway {
       return false
     }
     return grant.permittedProjectIDs.contains(projectID)
+  }
+
+  /// The closed wire reason for a read-cursor refusal. A regressing or
+  /// repeated position is a stale command: the device is asking for something
+  /// the Mac already moved past.
+  static func wireReason(for error: DeviceReadCursorError) -> SecureCommandDenialReason {
+    switch error {
+    case .notAuthorized: .projectNotAllowed
+    case .notMonotonic, .counterOverflow: .staleCommand
+    case .cursorLimitExceeded: .unsupportedCommand
+    case .corruptState, .storageUnavailable: .ledgerUnavailable
+    }
   }
 
   static func wireReason(for reason: CommandDenialReason) -> SecureCommandDenialReason {

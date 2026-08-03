@@ -1,3 +1,4 @@
+import CodexAppServer
 import CompanionProtocol
 import CryptoKit
 import Foundation
@@ -30,6 +31,23 @@ final class FakeNetworkSessionVerifier: NetworkSessionVerifying, @unchecked Send
     lock.lock()
     defer { lock.unlock() }
     current.removeAll()
+  }
+}
+
+/// Deterministic Codex responder that counts every external call.
+actor FakeCommandResponder: CodexApprovalResponding {
+  private(set) var interruptCalls: [(threadID: String, turnID: String)] = []
+  private var failure: (any Error)?
+
+  func setFailure(_ error: (any Error)?) { failure = error }
+
+  var interruptCallCount: Int { interruptCalls.count }
+
+  func respondToServerRequest(id: Int64, result: JSONValue) async throws {}
+
+  func interruptTurn(threadID: String, turnID: String) async throws {
+    interruptCalls.append((threadID, turnID))
+    if let failure { throw failure }
   }
 }
 
@@ -84,9 +102,7 @@ actor FailingClaimLedger: CommandLedgering {
 }
 
 /// Step 2.9 gateway contracts: the fixed check order, device-bound command
-/// identity, and known-result replay. The P0 command executions land with
-/// their own coverage; here every allowlisted command still resolves to
-/// `unsupportedCommand` at the execution step.
+/// identity, and known-result replay.
 final class NetworkCommandGatewayTests: XCTestCase {
   private let deviceID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
   private let otherDeviceID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
@@ -264,9 +280,9 @@ final class NetworkCommandGatewayTests: XCTestCase {
     let outcome = await world.gateway.execute(
       command: try markReadCommand(), context: world.context)
 
-    // The execution allowlist is empty in this PR, so it stops at execution
-    // rather than at the runtime check.
-    XCTAssertEqual(outcome, .denied(.unsupportedCommand))
+    guard case .completed = outcome else {
+      return XCTFail("a device-local mutation must not depend on the runtime")
+    }
   }
 
   /// A denied command must leave **no** ledger record. Otherwise an honest
@@ -494,6 +510,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
     let runtime = FakeNetworkRuntime()
     let table = ThreadProjectTable()
     let storage = InMemoryGrantAuthorityStore()
+    let responder = FakeCommandResponder()
+    let readCursors: DeviceReadCursorStore
     let context: NetworkCommandContext
     let otherSessionID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
     private let deviceID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
@@ -516,13 +534,21 @@ final class NetworkCommandGatewayTests: XCTestCase {
       table.attribute(threadID: "thread-b", projectID: "project-b")
       sessions = FakeNetworkSessionVerifier(deviceID: deviceID, sessionID: sessionID)
       self.ledger = ledger ?? InMemoryCommandLedger()
+      readCursors = try DeviceReadCursorStore(
+        storage: InMemoryReadCursorStorage(),
+        scopes: authority,
+        attribution: table,
+        clock: { 1_000_000 }
+      )
       context = NetworkCommandContext(deviceID: deviceID, sessionID: sessionID)
       gateway = NetworkCommandGateway(
         authority: authority,
         attribution: table,
         ledger: self.ledger,
         sessions: sessions,
-        runtime: runtime
+        runtime: runtime,
+        responder: responder,
+        readCursors: readCursors
       )
     }
 
