@@ -584,18 +584,55 @@ The embedded-channel `settle()` helper spun on `Task.yield()`, which does **not*
 - **`turn/steer` and the `workspaceWrite` form of `turn/start` remain unverified** against a live Codex, unchanged from Steps 2.10 and 2.11.
 - Source-only evidence: no simulator, generic-device, or physical-device claim is made by Step 2.13.
 
+## Step 2.14 progress — the composition root
+
+Step 2.13 recorded that "no component news up the whole graph" and that closing it would be "small and mechanical". It was neither, and the reason is the finding below.
+
+### The wiring defect
+
+`HardenedWSSListener.makeBootstrap` called `configureChild` **without** an `observation`, `commands`, or `frameProvider` argument. All three parameters had denying defaults, so every listener the actor built served the denying handlers — no observation, no commands, and no way for an authenticated connection to open a single application message. `ListenerConfiguration` had no field to inject them either, so there was no way to fix it at a call site.
+
+Steps 2.8 and 2.9 were tested against `ListenerPipeline.configure`, which does take all three. Only tests called it. Everything the phase built on top of those seams was correct and unreachable.
+
+This is the specific thing a composition root is for. No unit test could have caught it, because the defect was an *absent* argument at the one call site no test exercised, and the assertion that would have failed could not be written — there was no field to assert on.
+
+### What landed
+
+- **The three seams are now on `ListenerConfiguration`** and threaded through `makeBootstrap` to `configureChild`. All three keep denying defaults, so a configuration built without them still serves nothing rather than serving unfiltered state.
+- **A production enabled-configuration factory.** Before this, `testOnlyEnabled` was the only factory producing `isEnabled: true` — the shipping app had no route to a bound socket. `ListenerConfiguration.enabled(by:…)` requires a `ListenerEnablement`, which has no public initializer, no `Codable` conformance, and no stored state, so it cannot be decoded from a preference or restored from disk. The only way to obtain one is `ListenerEnablement.userRequested()`, which makes every production enable greppable. Production also defaults to the strict interface policy, so loopback is refused.
+- **`BridgeNetworkAssembly`** — the composition root. It builds the TLS provider over the Secure Enclave `.tls` identity, the three startup probes, the handshake handler, and the listener, and vends the `BridgeLANController` the menu drives. It owns no policy; every decision it makes is a wiring decision.
+- **A fresh frame registry per listener**, and the *same* registry on both sides of the handshake. Codecs carry counters, so a registry resumed across LAN sessions is a replay window; two different registries would authenticate a device that could then open nothing.
+- **The startup probes are real.** The grant probe fails LAN closed when the authority is latched. The Codex probe refuses an unsupported version, a schema mismatch, and a probe that could not run. The policy probe checks the one property `authorize` leans on — that combining every action profile lands on `observe` — and deliberately does not reach for the fileprivate `permitsAgentWork` to do it.
+
+### Step 2.14 verification so far
+
+**13 new deterministic tests** (root suite total **964**, up from 951). Three of them assert the wiring directly: real handlers rather than denying ones, one shared frame registry, and a distinct registry per listener.
+
+### What Step 2.14 still owes
+
+- The iOS acceptance host does not exist. There is no `.xcodeproj` and no app target, so nothing has been signed or installed.
+- Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
+- The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
+- The pairing QR and phrase confirmation still have no UI.
+- `turn/steer` and the `workspaceWrite` form of `turn/start` remain unverified against a live Codex.
+
 ## Current verification evidence
 
 ```text
-Root swift test: 951 passed, 0 failed
+Root swift test: 964 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 364, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 67, CodexAppServerTests 18)
+   CodexMicroBridgeTests 80, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
+Generic iOS device build (xcodebuild -scheme CompanionCrypto
+  -destination "generic/platform=iOS"): BUILD SUCCEEDED against the iOS 27.0 SDK,
+  arm64-apple-ios17.0. This was listed as outstanding required merge evidence from
+  Step 2.2 through Step 2.13 and had never been run in this environment
 Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run since
-Phase 2 production listener added: yes — off by default, enabled only by internal
-  test configuration; no user-facing enable control exists
+Phase 2 production listener added: yes — off by default. A production enabled
+  configuration now exists and requires a ListenerEnablement that only an explicit
+  user action mints and nothing persists
 Phase 2 production dependencies added: yes — the complete ADR §4 set, exactly eight pins
   (swift-nio 2.101.3, swift-nio-transport-services 1.28.0, swift-certificates 1.19.4
    direct; swift-atomics 1.3.1, swift-collections 1.6.0, swift-system 1.7.5,
@@ -604,8 +641,12 @@ Production Bonjour advertisement added: the record, its lifecycle, and the signe
   NSBonjourServices allowlist exist; the default publisher advertises nothing and no
   record has ever been published by this code
 Listener reachable by a user: the menu control exists and is the only way to enable it;
-  LAN access is off on every launch and enablement is never persisted. No component yet
-  constructs a real HardenedWSSListener to hand it
+  LAN access is off on every launch and enablement is never persisted. BridgeNetworkAssembly
+  now constructs a real HardenedWSSListener over the Secure Enclave TLS provider and hands
+  it to the LAN controller. No socket has been bound by this code
+Observation and command seams reachable from a real listener: yes, as of Step 2.14.
+  Before it, HardenedWSSListener passed neither to its child pipeline and every
+  production listener served the denying handlers
 Production thread-to-project attribution: yes — resolved from thread["cwd"] against the
   Mac user's allowlisted project roots; unattributable threads stay invisible
 Network command path added: yes — the sole gateway, with interruptTurn, markThreadRead,
@@ -634,11 +675,15 @@ The counts above supersede the Step 2.7 block, which transposed the `MacBridgeCo
 
 ## Deferred beyond Steps 2.1–2.13
 
-- **Step 2.14 — physical signed-iPhone acceptance.** The only remaining Phase 2 step. It needs an Apple development team, a signed acceptance host, and a real iPhone on real Wi-Fi; none of that exists in this environment, so Phase 2 stays **Mac/protocol complete (provisional)** and no acceptance tag may be created. Its first task is the small mechanical composition that news up the whole graph: a real `HardenedWSSListener` over the Secure Enclave identity, handed to the LAN controller.
+- **Step 2.14 — physical signed-iPhone acceptance.** The only remaining Phase 2 step, now **in progress**. Phase 2 stays **Mac/protocol complete (provisional)** and no acceptance tag may be created until every gate passes on a frozen `main` SHA.
+
+  The prerequisites this section previously recorded as absent have been checked and are present: an Apple development team (`8QSM298XJ2`, read from the signing certificate's OU — the parenthetical in the identity's common name is a different identifier and is not the team), and two paired physical iPhones on iOS 27.0 (iPhone 13 and iPhone 11), both reported `available (paired)` by `devicectl`. What is *not* present is the signed acceptance host itself: there is no `.xcodeproj` and no iOS app target, and creating one is Step 2.14's own deliverable rather than a blocker on it.
+
+  The composition this section called "small and mechanical" was neither; see the Step 2.14 progress section for the wiring defect it exposed.
 
 - `startThread` is the conditional 2.12 product decision: it is implemented behind an explicit Mac feature toggle only if v1 allows new threads, and is otherwise closed by a recorded deferral. That decision is the user's and has not been made.
 - Verifying the app-server methods against a live Codex before Step 2.13: the `workspaceWrite` form of `turn/start`, and `turn/steer` in full — the latter appears nowhere in this repository's proven surface, so the steering path may not work at all until it is confirmed. Also supplying a production writable-root resolver so workspace-write is reachable at all.
-- Wiring the Step 2.8/2.9 pieces into a running bridge: notifying the broker from `CodexBridgeAssembly`'s event pump, supplying a production thread-to-project resolver, pushing deliveries to a connection when new authorized data arrives rather than only when the device speaks, applying the authorization-change coordinator's returned close/reauthenticate action to real sockets, adapting `SessionCoordinator` to the gateway's session verifier, handing the gateway to the listener's command seam, and scheduling the Step 2.5/2.6 sweeps (Step 2.13).
+- Wiring the Step 2.8/2.9 pieces into a running bridge: notifying the broker from `CodexBridgeAssembly`'s event pump, supplying a production thread-to-project resolver, pushing deliveries to a connection when new authorized data arrives rather than only when the device speaks, applying the authorization-change coordinator's returned close/reauthenticate action to real sockets, adapting `SessionCoordinator` to the gateway's session verifier, handing the gateway to the listener's command seam, and scheduling the Step 2.5/2.6 sweeps (Step 2.13). **Handing the gateway and broker to the listener was recorded as done at Step 2.13 and was not** — the adapters existed but the listener accepted neither. Closed in Step 2.14; pushing deliveries proactively remains open.
 - Reconciling an interrupt, a started turn, or a steer against an observed turn-state change, rather than treating a returned call as success. Binding the turn-policy registry to observed `turn/completed` events belongs here too, so steering a finished turn is a clean denial rather than an `outcomeUnknown`. Not Phase 2 scope.
 - Binding the `MacBridgeServer` Secure Enclave identity to the pairing and session signer seams, and calling `DeviceGrantAuthority.addGrant` with the pairing proposal. Both are composition rather than design — every seam they plug into exists and is tested — and both belong to the Step 2.14 acceptance host, which is the first thing that needs a real signed identity.
 - Presenting the pairing QR and confirming the verification phrase in the Mac UI. The phrase rendering exists; the presentation belongs with the acceptance host that will actually pair a device.

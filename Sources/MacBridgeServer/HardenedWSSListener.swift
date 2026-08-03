@@ -209,6 +209,9 @@ public actor HardenedWSSListener {
     let rejections = self.rejections
     let logger = configuration.logger
     let handshake = configuration.handshake
+    let observation = configuration.observation
+    let commands = configuration.commands
+    let frameProvider = configuration.frameProvider
     let ceilings = self.ceilings
     let now = configuration.now
 
@@ -249,6 +252,9 @@ public actor HardenedWSSListener {
           rejections: rejections,
           logger: logger,
           handshake: handshake,
+          observation: observation,
+          commands: commands,
+          frameProvider: frameProvider,
           ceilings: ceilings,
           now: now
         )
