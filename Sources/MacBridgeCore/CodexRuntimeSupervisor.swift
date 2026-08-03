@@ -35,6 +35,14 @@ public protocol CodexRuntimeSession: Sendable {
 
   /// Interrupts exactly one turn.
   func interruptTurn(threadID: String, turnID: String) async throws
+
+  /// Starts exactly one phone-originated turn under bridge-resolved settings
+  /// and returns its opaque turn identifier.
+  func startTurn(
+    threadID: String,
+    prompt: String,
+    policy: PhoneTurnPolicy
+  ) async throws -> String
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -71,6 +79,24 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
 
   public func interruptTurn(threadID: String, turnID: String) async throws {
     try await client.interruptTurn(threadID: threadID, turnID: turnID)
+  }
+
+  /// Starts one turn under settings the bridge resolved. The parameters come
+  /// entirely from ``PhoneTurnPolicy``; the only phone-supplied value is the
+  /// prompt, which travels as typed text content.
+  public func startTurn(
+    threadID: String,
+    prompt: String,
+    policy: PhoneTurnPolicy
+  ) async throws -> String {
+    let response = try await client.request(
+      method: "turn/start",
+      params: policy.turnStartParameters(threadID: threadID, prompt: prompt)
+    )
+    guard let turnID = response["turn"]["id"].string, !turnID.isEmpty else {
+      throw CodexRuntimeRequestError.notReady
+    }
+    return turnID
   }
 }
 
@@ -140,7 +166,7 @@ public actor CodexRuntimeSupervisor {
     try await readySession().interruptTurn(threadID: threadID, turnID: turnID)
   }
 
-  private func readySession() throws -> any CodexRuntimeSession {
+  func readySession() throws -> any CodexRuntimeSession {
     guard case .ready = currentState, let session else {
       throw CodexRuntimeRequestError.notReady
     }

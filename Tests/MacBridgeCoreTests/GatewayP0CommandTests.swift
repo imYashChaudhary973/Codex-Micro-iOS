@@ -288,6 +288,8 @@ final class GatewayP0CommandTests: XCTestCase {
     let sessions: FakeNetworkSessionVerifier
     let runtime = FakeNetworkRuntime()
     let responder = FakeCommandResponder()
+    let turnStarter = FakeTurnStarter()
+    let workspaceRoots = FakeWorkspaceRootResolver()
     let readCursors: DeviceReadCursorStore
     let table = ThreadProjectTable()
     let context: NetworkCommandContext
@@ -326,6 +328,8 @@ final class GatewayP0CommandTests: XCTestCase {
         sessions: sessions,
         runtime: runtime,
         responder: responder,
+        turnStarter: turnStarter,
+        workspaceRoots: workspaceRoots,
         readCursors: readCursors
       )
     }

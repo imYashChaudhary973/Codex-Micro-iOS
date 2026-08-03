@@ -362,4 +362,12 @@ private struct FailingRuntimeSession: CodexRuntimeSession {
   func interruptTurn(threadID: String, turnID: String) async throws {
     throw CodexRuntimeRequestError.notReady
   }
+
+  func startTurn(
+    threadID: String,
+    prompt: String,
+    policy: PhoneTurnPolicy
+  ) async throws -> String {
+    throw CodexRuntimeRequestError.notReady
+  }
 }
