@@ -15,9 +15,16 @@ import SwiftUI
 /// Phase 3; it is not yet that app.
 @main
 struct CodexMicroAcceptanceApp: App {
+  @StateObject private var pairing = PhonePairingModel()
+
   var body: some Scene {
     WindowGroup {
-      AcceptanceView()
+      TabView {
+        PairingScreen(model: pairing, flow: PhonePairingFlow(model: pairing))
+          .tabItem { Label("Pair", systemImage: "qrcode") }
+        AcceptanceView()
+          .tabItem { Label("Matrix", systemImage: "checklist") }
+      }
     }
   }
 }

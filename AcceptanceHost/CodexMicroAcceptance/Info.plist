@@ -19,6 +19,10 @@
 	<array>
 		<string>_codexmicro._tcp</string>
 	</array>
+	<!-- Pairing scans the QR the Mac displays; the camera is used for nothing
+	     else and no image is stored or transmitted. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Codex Micro uses the camera once, to scan the pairing code shown on your Mac.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
