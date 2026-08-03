@@ -46,7 +46,13 @@ extension HardenedWSSListener: BridgeListenerControlling {}
 /// re-pairing. Any other outcome would let a wiped keychain silently
 /// invalidate every phone's pin while the bridge kept claiming to be itself.
 public actor BridgeSecureEnclaveTLSProvider: ListenerTLSIdentityProviding {
-  private let store: BridgeIdentityStore
+  /// Built inside the actor rather than handed in: `BridgeIdentityStore` is
+  /// not `Sendable` (it holds a backend and a policy closure), so passing one
+  /// across the isolation boundary would be exactly the data race the compiler
+  /// flags. The factory keeps the store confined to this actor for its whole
+  /// life.
+  private let makeStore: @Sendable () -> BridgeIdentityStore
+  private lazy var store: BridgeIdentityStore = makeStore()
   private let rotation: TLSRotationAuthority?
   private let currentDate: @Sendable () -> Date
   private var issued: BridgeTLSCertificate?
@@ -55,18 +61,19 @@ public actor BridgeSecureEnclaveTLSProvider: ListenerTLSIdentityProviding {
   /// Creates the provider.
   ///
   /// - Parameters:
-  ///   - store: The identity store over the Secure Enclave backend.
+  ///   - makeStore: Builds the identity store over the Secure Enclave
+  ///     backend, inside this actor.
   ///   - rotation: The anti-rollback rotation authority, when one is
   ///     available. The generation-0 baseline is recorded the first time a
   ///     certificate is issued; a baseline that already exists is left
   ///     alone, never overwritten.
   ///   - currentDate: Wall-clock seam, injected so renewal is testable.
   public init(
-    store: BridgeIdentityStore,
+    makeStore: @escaping @Sendable () -> BridgeIdentityStore,
     rotation: TLSRotationAuthority? = nil,
     currentDate: @escaping @Sendable () -> Date = { Date() }
   ) {
-    self.store = store
+    self.makeStore = makeStore
     self.rotation = rotation
     self.currentDate = currentDate
   }

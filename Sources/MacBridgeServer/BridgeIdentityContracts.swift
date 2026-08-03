@@ -28,6 +28,16 @@ public enum BridgeIdentityError: Error, Equatable, Sendable {
   /// Claim bookkeeping is unreadable, unwritable, or internally
   /// inconsistent (including duplicate claims).
   case claimStoreFailure
+  /// The Keychain refused for lack of an entitlement.
+  ///
+  /// Distinct from ``claimStoreFailure`` because the fix is completely
+  /// different: the Data Protection Keychain requires the calling code to
+  /// carry an `application-identifier` entitlement, which comes from signing
+  /// with a provisioning profile. A bundle signed with a bare identity gets
+  /// `errSecMissingEntitlement` on every write, which is a packaging problem
+  /// and not a broken Keychain — collapsing the two sends whoever reads it
+  /// looking in the wrong place.
+  case entitlementMissing
   /// Verified destruction left residual key or claim state behind.
   case cleanupIncomplete
   /// A complete identity already exists; creation never replaces it.

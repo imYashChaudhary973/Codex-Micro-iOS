@@ -1,7 +1,11 @@
+import AppKit
+import CompanionCrypto
 import CompanionProtocol
 import Foundation
 import MacBridgeCore
+import MacBridgeServer
 import Observation
+import SwiftUI
 
 /// Menu-bar view state derived from assembly updates. All strings shown in
 /// the UI are fixed status labels plus counts; no thread or prompt content.
@@ -19,6 +23,11 @@ final class BridgeStatusModel {
   private var observationTask: Task<Void, Never>?
   private var lanController: BridgeLANController?
   private var lanTask: Task<Void, Never>?
+  private var live: BridgeLiveComposition?
+  private var pairingWindow: NSWindow?
+  /// The endpoint the listener bound, kept so pairing can name it in the QR.
+  private var boundEndpoint: ListenerEndpoint?
+  private(set) var networkAvailable = true
 
   /// Whether the LAN control may be used.
   ///
@@ -45,6 +54,88 @@ final class BridgeStatusModel {
     lanController = controller
   }
 
+  /// Attaches the whole production network graph.
+  func attachLive(_ composition: BridgeLiveComposition) {
+    live = composition
+    lanController = composition.lanController
+  }
+
+  /// The bridge runs as a local status menu but offers no LAN or pairing.
+  func markNetworkUnavailable(reason: String = "unknown") {
+    networkAvailable = false
+    networkFailureReason = reason
+    lanController = nil
+  }
+
+  /// Why the network graph could not be built, for the menu.
+  private(set) var networkFailureReason: String?
+
+  /// One line describing LAN availability, or nil when it is available.
+  var networkUnavailableLine: String? {
+    guard !networkAvailable else { return nil }
+    return "LAN unavailable: \(networkFailureReason ?? "unknown")"
+  }
+
+  /// Pairing needs a bound listener, because the QR carries the endpoint and
+  /// the SPKI the listener is actually serving.
+  var canPair: Bool {
+    guard live != nil, boundEndpoint != nil else { return false }
+    if case .enabled = metrics.lanState { return true }
+    return false
+  }
+
+  /// Opens the pairing window and starts a session.
+  func openPairingWindow() {
+    guard let live, let endpoint = boundEndpoint else { return }
+    presentPairingWindow(live)
+    Task {
+      do {
+        try await live.pairing.beginPairing(
+          endpoint: endpoint,
+          selection: try SecureProtocolSelection(
+            major: 1, minor: 1, features: [.observeSync])
+        )
+      } catch {
+        await MainActor.run { live.pairingModel.set(.failed(reason: "sessionUnavailable")) }
+      }
+    }
+  }
+
+  private func presentPairingWindow(_ live: BridgeLiveComposition) {
+    if let pairingWindow {
+      pairingWindow.makeKeyAndOrderFront(nil)
+      NSApp.activate(ignoringOtherApps: true)
+      return
+    }
+    let view = BridgePairingView(
+      model: live.pairingModel,
+      onBegin: { [weak self] in self?.openPairingWindow() },
+      onConfirm: { Task { await live.pairing.confirmDisplayedPhrase() } },
+      onCancel: { [weak self] in
+        Task { await live.pairing.cancel() }
+        self?.closePairingWindow()
+      }
+    )
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 380, height: 460),
+      styleMask: [.titled, .closable],
+      backing: .buffered,
+      defer: false
+    )
+    window.title = "Pair a Device"
+    window.contentView = NSHostingView(rootView: view)
+    window.center()
+    window.isReleasedWhenClosed = false
+    pairingWindow = window
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate(ignoringOtherApps: true)
+  }
+
+  private func closePairingWindow() {
+    pairingWindow?.orderOut(nil)
+    pairingWindow = nil
+  }
+
   /// Toggles LAN access.
   ///
   /// Enablement is never persisted: every launch starts disabled, because a
@@ -59,11 +150,13 @@ final class BridgeStatusModel {
     case .enabling, .disabling: return
     }
     lanTask = Task { [weak self] in
+      var endpoint: ListenerEndpoint?
       if shouldEnable {
-        _ = try? await lanController.enable()
+        endpoint = try? await lanController.enable()
       } else {
         try? await lanController.disable()
       }
+      await MainActor.run { self?.boundEndpoint = endpoint }
       let state = await lanController.currentState()
       let advertising = await lanController.isAdvertising()
       await self?.applyLANState(state, isAdvertising: advertising)
@@ -93,8 +186,8 @@ final class BridgeStatusModel {
     }
   }
 
-  func markUnavailable() {
-    statusText = "Codex unavailable"
+  func markUnavailable(reason: String = "unknown") {
+    statusText = "Codex unavailable (\(reason))"
     symbolName = "exclamationmark.circle"
   }
 

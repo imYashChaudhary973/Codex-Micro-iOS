@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The identity store writes exclusively to the Data Protection Keychain
+	  (ADR §6, kSecUseDataProtectionKeychain). On macOS that Keychain refuses
+	  every operation from code without a keychain access group, returning
+	  errSecMissingEntitlement — which reads as a broken Keychain rather than
+	  as a missing entitlement, and is why the first signed launch reported
+	  identity.claimStore with no further detail.
+
+	  This entitlement is only valid when the bundle also carries a
+	  provisioning profile granting it, which is why the Mac bridge needs an
+	  Xcode target: codesign will attach the entitlement from a shell script,
+	  and the kernel will then refuse to spawn the process.
+	-->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+	</array>
+</dict>
+</plist>

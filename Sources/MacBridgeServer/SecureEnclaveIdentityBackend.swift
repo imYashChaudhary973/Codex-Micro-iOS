@@ -154,6 +154,8 @@ public final class SecureEnclaveIdentityBackend: SecureIdentityBackend {
       return .inserted
     case errSecDuplicateItem:
       return .alreadyPresent
+    case errSecMissingEntitlement:
+      throw BridgeIdentityError.entitlementMissing
     default:
       throw BridgeIdentityError.claimStoreFailure
     }

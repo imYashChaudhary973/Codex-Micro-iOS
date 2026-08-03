@@ -24,6 +24,9 @@ struct BridgeMenu: View {
     Text(model.statusText)
     Text("Threads: \(model.threadCount)")
     Text("Pending approvals: \(model.pendingApprovalCount)")
+    if let line = model.networkUnavailableLine {
+      Text(line)
+    }
     Divider()
     // Redacted connection metrics (plan Step 2.13). Every line is a count or
     // a closed state; `BridgeConnectionMetrics` has no field that could carry
@@ -40,6 +43,13 @@ struct BridgeMenu: View {
       model.toggleLANAccess()
     }
     .disabled(!model.isLANControlEnabled)
+    // Pairing needs a bound listener: the QR carries the endpoint and the
+    // served SPKI, and neither exists until LAN is on. Offering the control
+    // before then would produce a code pointing at nothing.
+    Button("Pair a Device…") {
+      model.openPairingWindow()
+    }
+    .disabled(!model.canPair)
     Divider()
     Button("Quit Codex Micro Bridge") {
       NSApp.terminate(nil)
@@ -52,23 +62,62 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
   private var assembly: CodexBridgeAssembly?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    NSApp.setActivationPolicy(.accessory)
+    // Menu-bar only is the product decision (Step 2.13): no Dock icon, no
+    // main window. On a notched Mac a full menu bar silently drops overflow
+    // items, which makes an accessory app unreachable rather than merely
+    // inconspicuous — so the acceptance run can opt into a Dock icon. It is
+    // an env-gated affordance, not a change to the default: unset, the app
+    // behaves exactly as before.
+    let wantsDockIcon = ProcessInfo.processInfo.environment["CODEX_MICRO_SHOW_DOCK"] == "1"
+    NSApp.setActivationPolicy(wantsDockIcon ? .regular : .accessory)
+    if wantsDockIcon {
+      NSApp.activate(ignoringOtherApps: true)
+    }
 
-    let assembly: CodexBridgeAssembly
+    // The Codex runtime and the network graph are built independently, and
+    // that separation is the point. An earlier version returned early when the
+    // runtime failed, which left LAN and pairing permanently disabled for a
+    // reason that has nothing to do with either: the listener already refuses
+    // to bind when Codex is unsupported, through its own prerequisite probe.
+    // Coupling the whole composition to the runtime attaching meant one
+    // failure disabled three unrelated things.
+    let assembly: CodexBridgeAssembly?
     do {
       assembly = try CodexBridgeAssembly.live()
     } catch {
+      assembly = nil
       Task { @MainActor in
-        model.markUnavailable()
+        model.markUnavailable(reason: BridgeStartupReason.describe(error))
       }
-      return
     }
     self.assembly = assembly
+
     Task { @MainActor in
-      model.attach(assembly)
+      if let assembly {
+        model.attach(assembly)
+      }
+      // News up the network graph and hands the menu its LAN control and
+      // pairing service. Until Step 2.14 nothing called this, so the LAN
+      // button was permanently greyed out and there was no way to pair at all.
+      do {
+        let live = try BridgeLiveComposition.make(
+          codexProbe: BridgeCodexSupportProbe(
+            probe: SystemCodexCompatibilityProbe(
+              codexExecutableURL: try CodexExecutableLocator.locate()),
+            policy: .phase1
+          )
+        )
+        model.attachLive(live)
+      } catch {
+        // A bridge that cannot build its network graph still runs as a local
+        // status menu; it simply offers no LAN and no pairing. The reason is
+        // shown, because "unavailable" with no cause is undiagnosable.
+        model.markNetworkUnavailable(reason: BridgeStartupReason.describe(error))
+      }
     }
-    Task {
-      await assembly.start()
+
+    if let assembly {
+      Task { await assembly.start() }
     }
 
     let workspaceCenter = NSWorkspace.shared.notificationCenter

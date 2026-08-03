@@ -65,7 +65,8 @@ let package = Package(
     .executableTarget(
       name: "CodexMicroBridge",
       dependencies: [
-        "CompanionCrypto", "CompanionProtocol", "MacBridgeCore", "MacBridgeServer",
+        "CodexAppServer", "CompanionCrypto", "CompanionProtocol", "MacBridgeCore",
+        "MacBridgeServer",
       ],
       // Info.plist is the source of truth for the ADR §12 local-network keys
       // and is copied into the .app by Scripts/package-bridge.sh. SwiftPM must

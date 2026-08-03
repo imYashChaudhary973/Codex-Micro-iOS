@@ -43,6 +43,22 @@ cp "$REPO_ROOT/Sources/CodexMicroBridge/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.1" \
   "$APP/Contents/Info.plist" >/dev/null
 
+# NOTE: this script produces an UNENTITLED bundle, which cannot use the Data
+# Protection Keychain the identity store requires (ADR §6). It reports
+# identity.entitlementMissing and LAN stays unavailable.
+#
+# The entitlement cannot be added here. macOS refuses to spawn a bundle
+# carrying keychain-access-groups or application-identifier without a matching
+# provisioning profile — codesign attaches it happily and the kernel then
+# rejects the process at exec with "Launchd job spawn failed". A profile needs
+# an Xcode target, which is what MacHost/CodexMicroBridge.xcodeproj is for.
+#
+# Use MacHost for anything that must reach the Keychain:
+#   xcodebuild -project MacHost/CodexMicroBridge.xcodeproj \
+#     -scheme CodexMicroBridge -destination "platform=macOS" \
+#     -allowProvisioningUpdates build
+#
+# This script remains useful for a quick unsigned-path smoke run.
 echo "==> Signing"
 # Prefer a real development identity so the local-network grant sticks across
 # rebuilds. Fall back to ad-hoc so the script still produces a runnable bundle
@@ -62,6 +78,7 @@ fi
 
 echo "==> Verifying"
 codesign --verify --strict "$APP"
+
 /usr/libexec/PlistBuddy -c "Print :NSBonjourServices" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist"
 

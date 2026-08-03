@@ -288,9 +288,9 @@ final class BridgeNetworkAssemblyTests: XCTestCase {
         pairing: nil,
         broker: broker,
         gateway: gateway,
-        tls: BridgeSecureEnclaveTLSProvider(
-          store: BridgeIdentityStore(
-            backend: UnavailableIdentityBackend(), resetPolicy: { false })),
+        tls: BridgeSecureEnclaveTLSProvider(makeStore: {
+          BridgeIdentityStore(backend: UnavailableIdentityBackend(), resetPolicy: { false })
+        }),
         codexProbe: BridgeCodexSupportProbe(
           probe: StubCompatibilityProbe(
             report: CodexCompatibilityReport(codexVersion: "1.2.3", schemaDigest: "abc")),
