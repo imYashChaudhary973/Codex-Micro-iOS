@@ -64,7 +64,9 @@ let package = Package(
     ),
     .executableTarget(
       name: "CodexMicroBridge",
-      dependencies: ["CompanionProtocol", "MacBridgeCore"]
+      dependencies: [
+        "CompanionCrypto", "CompanionProtocol", "MacBridgeCore", "MacBridgeServer",
+      ]
     ),
     .target(
       name: "CodexTestSupport",
@@ -77,6 +79,13 @@ let package = Package(
     .testTarget(
       name: "CompanionCryptoTests",
       dependencies: ["CompanionCrypto", "CompanionProtocol"]
+    ),
+    .testTarget(
+      name: "CodexMicroBridgeTests",
+      dependencies: [
+        "CodexMicroBridge", "CompanionCrypto", "CompanionProtocol", "MacBridgeCore",
+        "MacBridgeServer",
+      ]
     ),
     .testTarget(
       name: "MacBridgeCoreTests",
