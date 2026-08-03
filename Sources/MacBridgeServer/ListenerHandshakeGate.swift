@@ -369,6 +369,7 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
     await frames.store(
       ListenerSessionFrames(
         deviceID: authentication.session.identity.deviceID,
+        sessionID: authentication.session.identity.sessionID,
         inbound: authentication.session.inbound,
         outbound: authentication.session.outbound
       ),

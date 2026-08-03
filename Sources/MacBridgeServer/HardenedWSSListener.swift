@@ -263,6 +263,7 @@ public actor HardenedWSSListener {
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
     observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
     frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
@@ -343,6 +344,7 @@ public actor HardenedWSSListener {
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
     observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
     frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
@@ -508,6 +510,7 @@ public enum ListenerPipeline {
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
     observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
     frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
@@ -562,6 +565,7 @@ public enum ListenerPipeline {
       ListenerObservationHandler(
         connectionID: connectionID,
         observation: observation,
+        commands: commands,
         frameProvider: frameProvider,
         logger: logger
       ),
