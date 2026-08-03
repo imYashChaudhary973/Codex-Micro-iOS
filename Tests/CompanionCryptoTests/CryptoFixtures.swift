@@ -159,9 +159,7 @@ enum CryptoFixtures {
     deviceNonce: Data = CryptoFixtures.sessionDeviceNonce,
     hostEphemeralPublicKey: Data? = nil,
     hostNonce: Data = CryptoFixtures.sessionHostNonce,
-    grantRevision: UInt64 = 7,
-    authorizedViewEpoch: UInt64 = 3,
-    hostGeneration: UInt64 = 1
+    hostTLSSPKIFingerprint: Data? = nil
   ) throws -> SessionTranscript {
     try SessionTranscript(
       sessionID: sessionID,
@@ -171,9 +169,7 @@ enum CryptoFixtures {
       deviceNonce: deviceNonce,
       hostEphemeralPublicKey: hostEphemeralPublicKey ?? serverEphemeralPublicKeyX963,
       hostNonce: hostNonce,
-      grantRevision: grantRevision,
-      authorizedViewEpoch: authorizedViewEpoch,
-      hostGeneration: hostGeneration
+      hostTLSSPKIFingerprint: hostTLSSPKIFingerprint ?? tlsCurrentSPKIFingerprint
     )
   }
 
@@ -196,10 +192,58 @@ enum CryptoFixtures {
         try sessionTranscript(hostEphemeralPublicKey: mutated(serverEphemeralPublicKeyX963, at: 50))
       ),
       ("hostNonce", try sessionTranscript(hostNonce: mutated(sessionHostNonce, at: 16))),
-      ("grantRevision", try sessionTranscript(grantRevision: 8)),
-      ("authorizedViewEpoch", try sessionTranscript(authorizedViewEpoch: 4)),
-      ("hostGeneration", try sessionTranscript(hostGeneration: 2)),
+      (
+        "hostTLSSPKIFingerprint",
+        try sessionTranscript(hostTLSSPKIFingerprint: tlsNextSPKIFingerprint)
+      ),
     ]
+  }
+
+  /// Every session-auth-statement field mutated independently.
+  static func mutatedSessionAuthStatements() throws
+    -> [(field: String, SessionAuthenticationStatement)]
+  {
+    [
+      ("hostID", try sessionAuthenticationStatement(hostID: otherUUID)),
+      ("deviceID", try sessionAuthenticationStatement(deviceID: otherUUID)),
+      (
+        "selection.major",
+        try sessionAuthenticationStatement(selection: alternateMajorSelection())
+      ),
+      (
+        "selection.minor",
+        try sessionAuthenticationStatement(selection: alternateMinorSelection())
+      ),
+      (
+        "selection.features",
+        try sessionAuthenticationStatement(selection: reducedFeatureSelection())
+      ),
+      (
+        "deviceEphemeralPublicKey",
+        try sessionAuthenticationStatement(
+          deviceEphemeralPublicKey: mutated(clientEphemeralPublicKeyX963, at: 12))
+      ),
+      (
+        "deviceNonce",
+        try sessionAuthenticationStatement(deviceNonce: mutated(sessionDeviceNonce, at: 9))
+      ),
+    ]
+  }
+
+  static func sessionAuthenticationStatement(
+    hostID: UUID = CryptoFixtures.hostID,
+    deviceID: UUID = CryptoFixtures.deviceID,
+    selection: SecureProtocolSelection? = nil,
+    deviceEphemeralPublicKey: Data? = nil,
+    deviceNonce: Data = CryptoFixtures.sessionDeviceNonce
+  ) throws -> SessionAuthenticationStatement {
+    try SessionAuthenticationStatement(
+      hostID: hostID,
+      deviceID: deviceID,
+      selection: selection ?? CryptoFixtures.selection(),
+      deviceEphemeralPublicKey: deviceEphemeralPublicKey ?? clientEphemeralPublicKeyX963,
+      deviceNonce: deviceNonce
+    )
   }
 
   static func rotationStatement(

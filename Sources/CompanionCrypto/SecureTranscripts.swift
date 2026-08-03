@@ -103,10 +103,22 @@ extension PairingTranscript: CustomStringConvertible, CustomDebugStringConvertib
 
 /// Canonical session-authentication transcript (ADR §11) binding the session
 /// ID, authenticated device, exact negotiated protocol tuple, both ephemeral
-/// ECDH contributions and nonces, and the Mac-stored authority counters.
+/// ECDH contributions and nonces, and the pinned TLS SPKI fingerprint of the
+/// channel the session runs over.
 ///
-/// Both endpoints construct it independently from the exchanged message
-/// fields; its hash also salts the directional frame-key schedule.
+/// **Both endpoints sign exactly this**, in the order host then device, and
+/// its hash salts the directional frame-key schedule. It carries no Mac
+/// authority counter on purpose: the device must sign the transcript to prove
+/// handshake freshness, and it can only do that if the transcript is
+/// exchangeable before the device is authenticated — so nothing in it may be
+/// authorization state (plan §7 gate 2). The Mac's grant revision,
+/// authorized-view epoch, and host generation are enforced host-side against
+/// the registered session and delivered only in sealed post-authentication
+/// traffic.
+///
+/// Binding `hostTLSSPKIFingerprint` ties the session to the same pinned
+/// channel identity pairing already binds, so a session transcript is not
+/// transferable to a different TLS identity.
 public struct SessionTranscript: Equatable, Sendable {
   public let sessionID: UUID
   public let deviceID: UUID
@@ -115,9 +127,7 @@ public struct SessionTranscript: Equatable, Sendable {
   public let deviceNonce: Data
   public let hostEphemeralPublicKey: Data
   public let hostNonce: Data
-  public let grantRevision: UInt64
-  public let authorizedViewEpoch: UInt64
-  public let hostGeneration: UInt64
+  public let hostTLSSPKIFingerprint: Data
 
   public init(
     sessionID: UUID,
@@ -127,9 +137,7 @@ public struct SessionTranscript: Equatable, Sendable {
     deviceNonce: Data,
     hostEphemeralPublicKey: Data,
     hostNonce: Data,
-    grantRevision: UInt64,
-    authorizedViewEpoch: UInt64,
-    hostGeneration: UInt64
+    hostTLSSPKIFingerprint: Data
   ) throws {
     try requireExactCryptoByteCount(
       deviceEphemeralPublicKey,
@@ -145,6 +153,8 @@ public struct SessionTranscript: Equatable, Sendable {
     )
     try requireExactCryptoByteCount(
       hostNonce, SecureTransportLimits.nonceByteCount, field: "hostNonce")
+    try requireExactCryptoByteCount(
+      hostTLSSPKIFingerprint, SPKIFingerprint.byteCount, field: "hostTLSSPKIFingerprint")
     self.sessionID = sessionID
     self.deviceID = deviceID
     self.selection = selection
@@ -152,9 +162,7 @@ public struct SessionTranscript: Equatable, Sendable {
     self.deviceNonce = deviceNonce
     self.hostEphemeralPublicKey = hostEphemeralPublicKey
     self.hostNonce = hostNonce
-    self.grantRevision = grantRevision
-    self.authorizedViewEpoch = authorizedViewEpoch
-    self.hostGeneration = hostGeneration
+    self.hostTLSSPKIFingerprint = hostTLSSPKIFingerprint
   }
 
   /// The canonical, injective byte encoding of this transcript.
@@ -167,9 +175,7 @@ public struct SessionTranscript: Equatable, Sendable {
     encoder.appendVariableBytes(deviceNonce)
     encoder.appendVariableBytes(hostEphemeralPublicKey)
     encoder.appendVariableBytes(hostNonce)
-    encoder.appendUInt64(grantRevision)
-    encoder.appendUInt64(authorizedViewEpoch)
-    encoder.appendUInt64(hostGeneration)
+    encoder.appendVariableBytes(hostTLSSPKIFingerprint)
     return encoder.encodedBytes
   }
 

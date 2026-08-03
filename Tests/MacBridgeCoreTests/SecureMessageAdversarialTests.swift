@@ -219,15 +219,16 @@ final class SecureMessageAdversarialTests: XCTestCase {
     )
   }
 
-  func testAuthResponseNegativeCounterFailsClosed() {
-    assertRejects(
-      SecureSessionAuthResponse.self,
-      mutated(SecureFixtures.authResponseJSON, #""grantRevision":7"#, #""grantRevision":-7"#)
-    )
-    assertRejects(
-      SecureSessionAuthResponse.self,
-      mutated(SecureFixtures.authResponseJSON, #""hostGeneration":1"#, #""hostGeneration":1.5"#)
-    )
+  func testAuthResponseRejectsReintroducedAuthorityMetadata() {
+    // Authority counters were deliberately removed from the reply: the peer
+    // is not authenticated when it arrives. Any attempt to put them back —
+    // by a future change or by a peer on the wire — fails strict decoding.
+    for field in [#""grantRevision":7"#, #""authorizedViewEpoch":3"#, #""hostGeneration":1"#] {
+      assertRejects(
+        SecureSessionAuthResponse.self,
+        mutated(SecureFixtures.authResponseJSON, #""sessionID":"#, "\(field),\"sessionID\":")
+      )
+    }
   }
 
   func testAuthResponseUnknownFieldFailsClosed() {
@@ -237,6 +238,75 @@ final class SecureMessageAdversarialTests: XCTestCase {
         SecureFixtures.authResponseJSON,
         #""sessionID":"#,
         #""projectNames":["secret-project"],"sessionID":"#
+      )
+    )
+  }
+
+  func testAuthConfirmationUnknownFieldFailsClosed() {
+    assertRejects(
+      SecureSessionAuthConfirmation.self,
+      mutated(
+        SecureFixtures.authConfirmationJSON,
+        #""deviceID":"#,
+        #""grantRevision":9,"deviceID":"#
+      )
+    )
+    assertRejects(
+      SecureSessionAuthConfirmation.self,
+      mutated(
+        SecureFixtures.authConfirmationJSON,
+        #""deviceID":"#,
+        #""approvalToken":"granted","deviceID":"#
+      )
+    )
+  }
+
+  func testAuthConfirmationWrongSignatureLengthFailsClosed() {
+    for count in [63, 65, 0] {
+      assertRejects(
+        SecureSessionAuthConfirmation.self,
+        mutated(
+          SecureFixtures.authConfirmationJSON,
+          "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZg==",
+          Data(repeating: 0x66, count: count).base64EncodedString()
+        )
+      )
+    }
+    XCTAssertThrowsError(
+      try SecureSessionAuthConfirmation(
+        sessionID: SecureFixtures.sessionID,
+        deviceID: SecureFixtures.deviceID,
+        transcriptSignature: Data(repeating: 0x66, count: 96)
+      )
+    ) { error in
+      XCTAssertEqual(
+        error as? SecureWireValidationError, .invalidField(name: "transcriptSignature"))
+    }
+  }
+
+  func testAuthConfirmationWrongTypesAndMissingFieldsFailClosed() {
+    assertRejects(
+      SecureSessionAuthConfirmation.self,
+      mutated(
+        SecureFixtures.authConfirmationJSON,
+        #""sessionID":"44444444-4444-4444-4444-444444444444""#,
+        #""sessionID":44444444"#
+      )
+    )
+    assertRejects(
+      SecureSessionAuthConfirmation.self,
+      mutated(
+        SecureFixtures.authConfirmationJSON,
+        #""deviceID":"33333333-3333-3333-3333-333333333333","#,
+        ""
+      )
+    )
+    assertRejects(
+      SecureSessionAuthConfirmation.self,
+      mutated(
+        SecureFixtures.authConfirmationJSON,
+        #""sessionID":"44444444-4444-4444-4444-444444444444""#,
+        #""sessionID":"not-a-uuid""#
       )
     )
   }

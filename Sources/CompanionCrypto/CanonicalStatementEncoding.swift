@@ -16,6 +16,7 @@ public enum CanonicalStatementVersion {
 public enum CanonicalStatementDomain: String, CaseIterable, Sendable {
   case pairingQRPayload = "codex-micro/pairing-qr/v1"
   case pairingTranscript = "codex-micro/pairing-transcript/v1"
+  case sessionAuthenticationStatement = "codex-micro/session-auth-statement/v1"
   case sessionTranscript = "codex-micro/session-transcript/v1"
   case rotationStatement = "codex-micro/rotation-statement/v1"
   case frameKeyClientToServer = "codex-micro/frame-key/client-to-server/v1"

@@ -20,6 +20,10 @@ enum GoldenVectors {
   static let pairingHashHex =
     "e9f634710acadddb41eb2f3ef41d869abaa02ec0141b710cd6af625aa707aa3e"
 
+  /// Session transcript: session, device, exact tuple, both ephemerals and
+  /// nonces, and the pinned TLS SPKI fingerprint. It carries no authority
+  /// counter — both endpoints must be able to sign it before the device is
+  /// authenticated, so nothing in it may be authorization state.
   static let sessionEncodingHex =
     "010021636f6465782d6d6963726f2f73657373696f6e2d7472616e7363726970742f7631001044444444"
     + "444444444444444444444444001033333333333333333333333333333333000100010003000f6f627365"
@@ -29,10 +33,23 @@ enum GoldenVectors {
     + "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4004104bd5714b9c20400411f1e51"
     + "dbff63647f05d1d70b55fc200c6cad10c2f4614dc1e5048562f731f54573c04224d973a916a59f526a82"
     + "68076fc1cfa92a5f143f190020f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7"
-    + "f7f7f7000000000000000700000000000000030000000000000001"
+    + "f7f7f70020480b0dcd0b0547fb175a4acb7ee567f5e44f362ce272623bd3ec910c939c22f9"
 
   static let sessionHashHex =
-    "2a11c4bd769624ac51b6e18a323f2b8dcd85c274a6c0f54033d5fc859c1cb6d1"
+    "657d40ecc3b5a07c039b597bfe83bb5c95e0464a3aa3f873fbdf71bc02ed0392"
+
+  /// Session authentication statement: the first-order binding the device
+  /// signs in message 1, under its own domain separator.
+  static let sessionAuthStatementEncodingHex =
+    "010025636f6465782d6d6963726f2f73657373696f6e2d617574682d73746174656d656e742f76310010"
+    + "22222222222222222222222222222222001033333333333333333333333333333333000100010003000f"
+    + "6f6273657276652d73796e632d763100157468726561642d726561642d637572736f722d763100117475"
+    + "726e2d696e746572727570742d7631004104261efbd3550cf068ef013ed7366ba32f5d6fe557b4b2abce"
+    + "8ade58cba168a55e1788a0b29a56a6abec4084c0c96bd3dcbca6b507f35dbea9e985708479d8bdc90020"
+    + "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4"
+
+  static let sessionAuthStatementHashHex =
+    "5919008bc17e09e266ea3dc24b2e9c5b7f3f12661d730da0b999e143cd0200b8"
 
   /// Byte-exact canonical pairing QR payload (ADR §12 allowlist) built from
   /// the fixed pairing fixtures. Any added, removed, or reordered field
@@ -66,9 +83,9 @@ enum GoldenVectors {
   /// HKDF-SHA256 directional keys from the fixed IKM, the golden session
   /// transcript hash as salt, and the exact negotiated tuple labels.
   static let clientToServerKeyHex =
-    "85c21bd6481f3f90dc4cd00853942bf1fa80ec2fe4511b8022eff5d344800811"
+    "97d17c8541127f8a9d0b6573f2026f8d6d45fe9093b0faad0d6cc03e0c86171c"
   static let serverToClientKeyHex =
-    "9a9a47ceda9d2caab80a553609706a21e939b259334254380c77045b91a234ce"
+    "af303250745a03019690f1f90e175630bb942e7bb20370ae191a79d85c3c487d"
 
   /// ECDH shared secret between the fixed client and server ephemerals.
   static let sharedSecretHex =
@@ -85,9 +102,9 @@ enum GoldenVectors {
   /// Sealed client-to-server frames for counters 0 and 1 under the golden
   /// client-to-server key and fixed connection ID.
   static let frame0Hex =
-    "01633273315555555555555555555555555555555500000000000000000000001a216596de6204506d9d"
-    + "6f917a6fe5335f2ee0fab82b86596b78635516035f792bdbefd6f2c706c7057b17"
+    "01633273315555555555555555555555555555555500000000000000000000001a5599920c44208bdcad"
+    + "16a24262d6912021c77abd1650b64f6c4d48b0be9a6712d289848f1d42874e72ab"
   static let frame1Hex =
-    "01633273315555555555555555555555555555555500000000000000010000001a4887a4a7b699624868"
-    + "ce5fbba5736fe022f8e06beeb2e376e5d26203585e7061f7c3b6957a47e537ba03"
+    "01633273315555555555555555555555555555555500000000000000010000001aadaf21b88f5ca81167"
+    + "9a4c8a6eee5908ec76af7ddf1cbbd52b3b22251b5fbf317fe7ec0a4ef331392a1e"
 }

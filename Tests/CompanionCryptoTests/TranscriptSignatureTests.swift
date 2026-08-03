@@ -105,12 +105,28 @@ final class TranscriptSignatureTests: XCTestCase {
       using: CryptoFixtures.deviceSigningKey)
     let publicKey = CryptoFixtures.deviceSigningKey.publicKey
     let mutations = try CryptoFixtures.mutatedSessionTranscripts()
-    XCTAssertEqual(mutations.count, 12)
+    XCTAssertEqual(mutations.count, 10)
     for (field, mutated) in mutations {
       XCTAssertFalse(
         SecureTranscriptSignature.isValid(
           signature, for: mutated.canonicalEncoding(), publicKey: publicKey),
         "mutated session field \(field) must fail verification"
+      )
+    }
+  }
+
+  func testEverySessionAuthStatementFieldMutationFailsVerification() throws {
+    let signature = try SecureTranscriptSignature.sign(
+      CryptoFixtures.sessionAuthenticationStatement().canonicalEncoding(),
+      using: CryptoFixtures.deviceSigningKey)
+    let publicKey = CryptoFixtures.deviceSigningKey.publicKey
+    let mutations = try CryptoFixtures.mutatedSessionAuthStatements()
+    XCTAssertEqual(mutations.count, 7)
+    for (field, mutated) in mutations {
+      XCTAssertFalse(
+        SecureTranscriptSignature.isValid(
+          signature, for: mutated.canonicalEncoding(), publicKey: publicKey),
+        "mutated statement field \(field) must fail verification"
       )
     }
   }

@@ -217,17 +217,22 @@ public struct SecureSessionAuthRequest: Codable, Equatable, Sendable {
   }
 }
 
-/// Host reply completing session authentication. Binds the current Mac-stored
-/// grant revision, authorized-view epoch, and host generation into the
-/// session transcript.
+/// Host reply to a session authentication request: the host's fresh session
+/// ID, ephemeral contribution, and nonce, signed into the session transcript
+/// with the long-term host identity.
+///
+/// It deliberately carries **no authority metadata**. The device is not yet
+/// authenticated at this point — its own signature in
+/// ``SecureSessionAuthRequest`` proves possession of the long-term key but not
+/// freshness — so disclosing the grant revision, authorized-view epoch, or
+/// host generation here would hand grant state to an unauthenticated peer
+/// (plan §7 gate 2). Those counters stay Mac-side and reach the device only
+/// inside sealed post-authentication traffic.
 public struct SecureSessionAuthResponse: Codable, Equatable, Sendable {
   public let sessionID: UUID
   public let selection: SecureProtocolSelection
   public let hostEphemeralPublicKey: Data
   public let hostNonce: Data
-  public let grantRevision: UInt64
-  public let authorizedViewEpoch: UInt64
-  public let hostGeneration: UInt64
   public let transcriptSignature: Data
 
   public init(
@@ -235,9 +240,6 @@ public struct SecureSessionAuthResponse: Codable, Equatable, Sendable {
     selection: SecureProtocolSelection,
     hostEphemeralPublicKey: Data,
     hostNonce: Data,
-    grantRevision: UInt64,
-    authorizedViewEpoch: UInt64,
-    hostGeneration: UInt64,
     transcriptSignature: Data
   ) throws {
     try requireExactByteCount(
@@ -252,9 +254,6 @@ public struct SecureSessionAuthResponse: Codable, Equatable, Sendable {
     self.selection = selection
     self.hostEphemeralPublicKey = hostEphemeralPublicKey
     self.hostNonce = hostNonce
-    self.grantRevision = grantRevision
-    self.authorizedViewEpoch = authorizedViewEpoch
-    self.hostGeneration = hostGeneration
     self.transcriptSignature = transcriptSignature
   }
 
@@ -265,9 +264,6 @@ public struct SecureSessionAuthResponse: Codable, Equatable, Sendable {
       selection: container.decode(SecureProtocolSelection.self, forKey: .selection),
       hostEphemeralPublicKey: container.decode(Data.self, forKey: .hostEphemeralPublicKey),
       hostNonce: container.decode(Data.self, forKey: .hostNonce),
-      grantRevision: container.decode(UInt64.self, forKey: .grantRevision),
-      authorizedViewEpoch: container.decode(UInt64.self, forKey: .authorizedViewEpoch),
-      hostGeneration: container.decode(UInt64.self, forKey: .hostGeneration),
       transcriptSignature: container.decode(Data.self, forKey: .transcriptSignature)
     )
   }
@@ -277,9 +273,51 @@ public struct SecureSessionAuthResponse: Codable, Equatable, Sendable {
     case selection
     case hostEphemeralPublicKey
     case hostNonce
-    case grantRevision
-    case authorizedViewEpoch
-    case hostGeneration
+    case transcriptSignature
+  }
+}
+
+/// Third and final authentication message, sent by the device after it
+/// verified the host's transcript signature over an independently
+/// reconstructed transcript.
+///
+/// It is what makes authentication fresh: the device signs exactly the same
+/// canonical session transcript the host signed, and that transcript binds the
+/// host's fresh session ID, ephemeral key, and nonce. A replayed
+/// ``SecureSessionAuthRequest`` therefore cannot be completed — the host mints
+/// new contributions each time and only the real device can sign the resulting
+/// transcript — so no session is registered and no existing session is
+/// displaced until this message verifies. The device ID is a non-secret,
+/// device-asserted identifier (threat model §3.3), never proof of identity.
+public struct SecureSessionAuthConfirmation: Codable, Equatable, Sendable {
+  public let sessionID: UUID
+  public let deviceID: UUID
+  public let transcriptSignature: Data
+
+  public init(
+    sessionID: UUID,
+    deviceID: UUID,
+    transcriptSignature: Data
+  ) throws {
+    try requireExactByteCount(
+      transcriptSignature, SecureTransportLimits.signatureByteCount, field: "transcriptSignature")
+    self.sessionID = sessionID
+    self.deviceID = deviceID
+    self.transcriptSignature = transcriptSignature
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try strictContainer(from: decoder, keyedBy: CodingKeys.self)
+    try self.init(
+      sessionID: container.decode(UUID.self, forKey: .sessionID),
+      deviceID: container.decode(UUID.self, forKey: .deviceID),
+      transcriptSignature: container.decode(Data.self, forKey: .transcriptSignature)
+    )
+  }
+
+  private enum CodingKeys: String, CodingKey, CaseIterable {
+    case sessionID
+    case deviceID
     case transcriptSignature
   }
 }

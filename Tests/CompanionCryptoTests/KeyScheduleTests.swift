@@ -73,7 +73,9 @@ final class KeyScheduleTests: XCTestCase {
 
   func testKeysBindTheTranscriptHashSalt() throws {
     let baseline = try CryptoFixtures.frameKeys()
-    let otherHash = try CryptoFixtures.sessionTranscript(grantRevision: 8).canonicalHash()
+    let otherHash = try CryptoFixtures.sessionTranscript(
+      hostTLSSPKIFingerprint: CryptoFixtures.tlsNextSPKIFingerprint
+    ).canonicalHash()
     let keys = try SecureSessionKeySchedule.frameKeys(
       inputKeyMaterial: CryptoFixtures.keyScheduleIKM,
       sessionTranscriptHash: otherHash,
