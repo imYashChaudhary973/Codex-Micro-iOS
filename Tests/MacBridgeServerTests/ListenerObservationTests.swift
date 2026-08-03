@@ -410,11 +410,21 @@ final class ListenerObservationTests: XCTestCase {
     /// `eventLoop.execute`, so both have to be driven. `NIOAsyncTestingChannel`
     /// is used rather than `EmbeddedChannel` precisely because its loop is
     /// safe to drive from whichever thread resumes after an `await`.
+    /// Drains the testing loop and the detached work the handler spawns.
+    ///
+    /// The handler hands work to a detached `Task` and hops back through
+    /// `eventLoop.execute`. `Task.yield()` alone does **not** guarantee that
+    /// detached task is scheduled, so a fixed spin of yields passes on an idle
+    /// machine and fails under full-suite load — which is exactly how this
+    /// helper first went flaky. Each round therefore runs the loop and then
+    /// sleeps briefly, which does give the detached task a chance to run.
     func settle() async {
       for _ in 0..<64 {
-        await Task.yield()
         await channel.testingEventLoop.run()
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 100_000)
       }
+      await channel.testingEventLoop.run()
     }
 
     func writeInbound(_ bytes: Data) async {
