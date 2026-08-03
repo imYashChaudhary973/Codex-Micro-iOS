@@ -91,6 +91,9 @@ let package = Package(
       dependencies: [
         "CodexMicroBridge", "CompanionCrypto", "CompanionProtocol", "MacBridgeCore",
         "MacBridgeServer",
+        // The end-to-end pairing test builds a real serving identity, which
+        // needs certificate construction.
+        .product(name: "X509", package: "swift-certificates"),
       ]
     ),
     .testTarget(

@@ -691,10 +691,23 @@ The three gaps recorded above are closed on the Mac side.
 
 Eleven new tests. The pairing ones drive **both real state machines** — a real `PairingCoordinator` and a real `PairingDeviceEndpoint` exchanging the actual messages in order — rather than fabricating a proposal. `PairedDeviceProposal`'s initializer is internal on purpose, and widening it so a test could mint one would let the test assert something pairing never produces. That run is also what proves the property the six words exist for: both endpoints derive the same phrase from independently reconstructed transcripts.
 
+### End-to-end pairing over a real socket
+
+`PairingEndToEndTests` binds a real `HardenedWSSListener`, completes a real TLS 1.3 handshake against a pinned SPKI, performs the real HTTP upgrade, exchanges real handshake envelopes as WebSocket binary frames, and ends with a real grant in the Mac's authority. Every earlier pairing test drove the state machines directly; this is the first thing that put pairing on a wire.
+
+**It found a real property immediately.** The first run stalled at `awaitingPhrase`: the request and response completed and the phrase reached the Mac's screen, but the confirmation never landed. The cause is that a multi-message handshake must run on **one connection** — the host binds an in-flight pairing to the transport connection it arrived on. The probe client's one-shot `exchange` opened a second connection for the confirmation and its session was already invalidated. The phone's own `PairingClient` holds a single socket for exactly this reason, so the product was right and the test was wrong; the test now uses `withConnection` and mirrors the phone.
+
+Two cases pass:
+
+- A phone-style client pairs over the wire and the Mac stores an observe-only grant with an empty project allowlist. The test asserts the Mac's screen and the phone's phrase are the same six words, derived from independently reconstructed transcripts.
+- A client pinning the wrong SPKI fails at TLS. Nothing reaches the pairing coordinator, the screen does not move, and the bootstrap secret is **not** consumed — so a machine-in-the-middle cannot burn a pairing session by connecting.
+
+**This is loopback evidence, not physical-device proof.** It binds `127.0.0.1` and speaks to itself. No Bonjour record has been published and no phone has connected.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
-- **The phone cannot pair yet.** The Mac side is complete and the device-side state machine exists and is exercised in-process, but the acceptance host has no camera scanner and no pinned WSS client, so nothing on the phone can reach the Mac. That client is the last piece before an end-to-end pairing can be attempted.
+- **No phone has connected to the Mac.** Both halves now exist and pairing is proven end to end over loopback, but nothing has crossed real Wi-Fi: no Bonjour record has been published, and the acceptance host has never been pointed at the bridge.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -704,9 +717,9 @@ Eleven new tests. The pairing ones drive **both real state machines** — a real
 ## Current verification evidence
 
 ```text
-Root swift test: 980 passed, 0 failed
+Root swift test: 982 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 91, CodexAppServerTests 18)
+   CodexMicroBridgeTests 93, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
