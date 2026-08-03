@@ -6,20 +6,26 @@ import Foundation
 /// connection.
 ///
 /// This is the post-authentication counterpart of
-/// ``ListenerHandshakeKind``. It is deliberately just as narrow: Phase 2
-/// authenticates devices in order to let them observe, so the only two
-/// device-originated kinds are the subscription and its acknowledgement.
-/// `sendPrompt`, `steerTurn`, `interruptTurn`, `markThreadRead`, approvals,
-/// and attachments have no representation here at all — the command gateway
-/// is Step 2.9 and approvals are rejected throughout Phase 2 (plan §2
-/// invariant 17).
+/// ``ListenerHandshakeKind``, and it is deliberately just as narrow: three
+/// device-originated kinds, the subscription, its acknowledgement, and one
+/// opaque command envelope.
+///
+/// The command envelope carries a `ClientCommand` the transport never
+/// interprets. Which commands are permitted is decided entirely by the
+/// gateway's own allowlist behind the seam — the transport has no
+/// per-command kind to widen, so no future wire change here can enable a
+/// command the gateway has not accepted (plan §2 invariant 12).
 public enum ListenerApplicationKind: String, Codable, CaseIterable, Sendable {
   /// Device → host: open or resume an observation subscription.
   case observationSubscribe
   /// Device → host: acknowledge delivered data through a cursor.
   case observationAcknowledge
+  /// Device → host: one semantic mutation for the command gateway.
+  case commandRequest
   /// Host → device: one already-authorized snapshot or event batch.
   case observationDelivery
+  /// Host → device: the terminal result of one command.
+  case commandResult
   /// Host → device: the closed terminal reason.
   case closeNotice
 
@@ -27,8 +33,8 @@ public enum ListenerApplicationKind: String, Codable, CaseIterable, Sendable {
   /// post-authentication inbound allowlist.
   public var isDeviceOriginated: Bool {
     switch self {
-    case .observationSubscribe, .observationAcknowledge: return true
-    case .observationDelivery, .closeNotice: return false
+    case .observationSubscribe, .observationAcknowledge, .commandRequest: return true
+    case .observationDelivery, .commandResult, .closeNotice: return false
     }
   }
 }
@@ -232,11 +238,21 @@ public struct DenyingListenerObservationHandler: ListenerObservationHandling {
 /// over and forgets them rather than lending a copy.
 public struct ListenerSessionFrames: Sendable {
   public let deviceID: UUID
+  /// The authenticated session these codecs belong to. The gateway needs it
+  /// to confirm the session is still the device's current one, and it comes
+  /// from authentication rather than from any message.
+  public let sessionID: UUID
   public var inbound: SecureFrameOpener
   public var outbound: SecureFrameSealer
 
-  public init(deviceID: UUID, inbound: SecureFrameOpener, outbound: SecureFrameSealer) {
+  public init(
+    deviceID: UUID,
+    sessionID: UUID,
+    inbound: SecureFrameOpener,
+    outbound: SecureFrameSealer
+  ) {
     self.deviceID = deviceID
+    self.sessionID = sessionID
     self.inbound = inbound
     self.outbound = outbound
   }

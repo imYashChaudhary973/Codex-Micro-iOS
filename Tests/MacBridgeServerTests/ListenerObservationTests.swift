@@ -18,16 +18,20 @@ final class ListenerObservationTests: XCTestCase {
 
   // MARK: - Allowlist
 
-  func testExactlyTwoKindsAreDeviceOriginated() {
+  func testExactlyThreeKindsAreDeviceOriginated() {
     let inbound = ListenerApplicationKind.allCases.filter(\.isDeviceOriginated)
 
-    XCTAssertEqual(Set(inbound), [.observationSubscribe, .observationAcknowledge])
-    XCTAssertEqual(ListenerApplicationKind.allCases.count, 4)
+    XCTAssertEqual(
+      Set(inbound), [.observationSubscribe, .observationAcknowledge, .commandRequest])
+    XCTAssertEqual(ListenerApplicationKind.allCases.count, 6)
   }
 
   func testTheApplicationVocabularyHasNoCommandOrApprovalKind() {
     let raw = Set(ListenerApplicationKind.allCases.map(\.rawValue))
 
+    // The transport carries one opaque command envelope, never a per-command
+    // kind, so no wire change here can enable a command the gateway has not
+    // accepted.
     for forbidden in [
       "sendPrompt", "steerTurn", "interruptTurn", "markThreadRead", "startThread",
       "resolveApproval", "selectThread",
@@ -309,6 +313,7 @@ final class ListenerObservationTests: XCTestCase {
     let serverKey = SymmetricKey(data: Data(repeating: 0x5E, count: 32))
     let host = ListenerSessionFrames(
       deviceID: deviceID,
+      sessionID: sessionID,
       inbound: try SecureFrameOpener(
         key: clientKey, connectionID: sessionID, direction: .clientToServer),
       outbound: try SecureFrameSealer(
@@ -316,6 +321,7 @@ final class ListenerObservationTests: XCTestCase {
     )
     let device = ListenerSessionFrames(
       deviceID: deviceID,
+      sessionID: sessionID,
       inbound: try SecureFrameOpener(
         key: serverKey, connectionID: sessionID, direction: .serverToClient),
       outbound: try SecureFrameSealer(
@@ -347,6 +353,7 @@ final class ListenerObservationTests: XCTestCase {
       let serverKey = SymmetricKey(data: Data(repeating: 0x5E, count: 32))
       hostFrames = ListenerSessionFrames(
         deviceID: deviceID,
+        sessionID: sessionID,
         inbound: try SecureFrameOpener(
           key: clientKey, connectionID: sessionID, direction: .clientToServer),
         outbound: try SecureFrameSealer(
@@ -354,6 +361,7 @@ final class ListenerObservationTests: XCTestCase {
       )
       device = ListenerSessionFrames(
         deviceID: deviceID,
+        sessionID: sessionID,
         inbound: try SecureFrameOpener(
           key: serverKey, connectionID: sessionID, direction: .serverToClient),
         outbound: try SecureFrameSealer(
@@ -379,9 +387,14 @@ final class ListenerObservationTests: XCTestCase {
       await settle()
     }
 
-    /// Drains the event loop and any awaiting Tasks deterministically.
+    /// Drains the event loop and any awaiting Tasks.
+    ///
+    /// The handler hands work to a `Task` and hops back through
+    /// `eventLoop.execute`, so a fixed number of yields is not by itself a
+    /// guarantee. The loop therefore keeps spinning until the channel has
+    /// produced output or gone inactive, and only then stops.
     func settle() async {
-      for _ in 0..<64 {
+      for _ in 0..<400 {
         await Task.yield()
         channel.embeddedEventLoop.run()
       }

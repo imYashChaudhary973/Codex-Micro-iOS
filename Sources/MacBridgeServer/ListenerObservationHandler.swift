@@ -29,6 +29,7 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
 
   private let connectionID: UUID
   private let observation: any ListenerObservationHandling
+  private let commands: any ListenerCommandHandling
   private let frameProvider: any ListenerSessionFrameProviding
   private let logger: any ListenerLogging
   private var frames: ListenerSessionFrames?
@@ -48,11 +49,13 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
   public init(
     connectionID: UUID,
     observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
     frameProvider: any ListenerSessionFrameProviding,
     logger: any ListenerLogging
   ) {
     self.connectionID = connectionID
     self.observation = observation
+    self.commands = commands
     self.frameProvider = frameProvider
     self.logger = logger
   }
@@ -168,15 +171,22 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
   }
 
   private func dispatch(_ envelope: ListenerApplicationEnvelope, channel: Channel) {
-    guard let deviceID = frames?.deviceID else {
+    guard let deviceID = frames?.deviceID, let sessionID = frames?.sessionID else {
       close(channel, reason: .authenticationFailed)
       return
     }
     dispatchInFlight = true
     let eventLoop = channel.eventLoop
     let observation = self.observation
+    let commands = self.commands
     Task { [weak self] in
-      let outcome = await Self.resolve(envelope, deviceID: deviceID, observation: observation)
+      let outcome = await Self.resolve(
+        envelope,
+        deviceID: deviceID,
+        sessionID: sessionID,
+        observation: observation,
+        commands: commands
+      )
       guard let handler = self else { return }
       eventLoop.execute {
         handler.apply(outcome, channel: channel)
@@ -189,7 +199,9 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
   private static func resolve(
     _ envelope: ListenerApplicationEnvelope,
     deviceID: UUID,
-    observation: any ListenerObservationHandling
+    sessionID: UUID,
+    observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling
   ) async -> ListenerObservationResolution {
     do {
       switch envelope.kind {
@@ -227,7 +239,18 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
         return .deliver(
           ListenerObservationOutcome(
             subscriptionID: message.subscriptionID, batches: next.map { [$0] } ?? []))
-      case .observationDelivery, .closeNotice:
+      case .commandRequest:
+        // The transport does not interpret the command: it decodes it
+        // strictly, hands it to the gateway, and carries the closed result
+        // back. Which commands run is decided behind the seam.
+        guard let command = try? JSONDecoder().decode(ClientCommand.self, from: envelope.payload)
+        else {
+          return .close(.protocolViolation)
+        }
+        let outcome = await commands.execute(
+          command: command, deviceID: deviceID, sessionID: sessionID)
+        return .result(commandID: command.commandID, outcome: outcome)
+      case .observationDelivery, .commandResult, .closeNotice:
         return .close(.protocolViolation)
       }
     } catch let refusal as ListenerObservationRefusal {
@@ -250,7 +273,33 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
       for batch in resolved.batches {
         guard deliver(batch, channel: channel) else { return }
       }
+    case .result(let commandID, let outcome):
+      deliverCommandResult(commandID: commandID, outcome: outcome, channel: channel)
     }
+  }
+
+  /// Seals and writes one closed command result.
+  private func deliverCommandResult(
+    commandID: UUID,
+    outcome: ListenerCommandOutcome,
+    channel: Channel
+  ) {
+    guard var current = frames,
+      let result = try? outcome.wireResult(commandID: commandID),
+      let body = try? JSONEncoder().encode(result),
+      let envelope = try? ListenerApplicationEnvelope(kind: .commandResult, payload: body),
+      let plaintext = try? envelope.encoded(),
+      let sealed = try? current.outbound.seal(plaintext)
+    else {
+      logger.record(.applicationMessageRejected)
+      close(channel, reason: .messageBoundsExceeded)
+      return
+    }
+    frames = current
+    var buffer = channel.allocator.buffer(capacity: sealed.count)
+    buffer.writeBytes(sealed)
+    channel.writeAndFlush(buffer, promise: nil)
+    logger.record(.commandResultDelivered)
   }
 
   // MARK: - Outbound
@@ -335,6 +384,8 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
 enum ListenerObservationResolution: Sendable {
   /// Echo this subscription and send these already-authorized batches.
   case deliver(ListenerObservationOutcome)
+  /// Send this closed command result.
+  case result(commandID: UUID, outcome: ListenerCommandOutcome)
   /// Close with this post-authentication reason.
   case close(SecureCloseReason)
 }

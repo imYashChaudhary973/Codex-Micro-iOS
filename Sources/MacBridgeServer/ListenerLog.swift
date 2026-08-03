@@ -55,6 +55,8 @@ public enum ListenerLogCode: String, CaseIterable, Sendable {
   case applicationMessageRejected = "application_message_rejected"
   /// One already-authorized observation batch was sealed and written.
   case observationDelivered = "observation_delivered"
+  /// One closed command result was sealed and written.
+  case commandResultDelivered = "command_result_delivered"
   /// A handshake message was refused by its per-source ceiling.
   case handshakeRateExceeded = "handshake_rate_exceeded"
   /// A peer exceeded the pre-upgrade byte budget.
