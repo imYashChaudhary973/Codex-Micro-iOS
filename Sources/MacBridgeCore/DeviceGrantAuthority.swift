@@ -372,6 +372,18 @@ public actor DeviceGrantAuthority {
     return state.hostGeneration
   }
 
+  /// The current monotonic authority write sequence.
+  ///
+  /// Session authentication publishes this to the session registry so a
+  /// handshake holding an older sequence is refused at commit (plan §2
+  /// invariant 11). It is a counter and nothing else — deliberately separate
+  /// from ``macAdministrationSnapshot()``, which carries device records and
+  /// must never reach a network path.
+  public func currentAuthoritySequence() throws -> UInt64 {
+    try requireAvailable()
+    return state.authoritySequence
+  }
+
   /// The complete authority view for the Mac administration UI only.
   /// Never expose this snapshot to a network or device-scoped path.
   public func macAdministrationSnapshot() throws -> GrantAuthorityAdministrationSnapshot {
