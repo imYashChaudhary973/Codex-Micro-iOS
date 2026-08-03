@@ -107,6 +107,16 @@ public enum CommandRegistration: Equatable, Sendable {
   case replay(CommandLedgerRecord)
 }
 
+/// The outcome of claiming a `(deviceID, commandID)` key under a semantic
+/// digest.
+public enum NetworkCommandClaim: Equatable, Sendable {
+  /// The key is new and the caller owns this command's single execution.
+  case claimed(CommandLedgerRecord)
+  /// A record already exists for the key under the same semantic digest.
+  /// The caller must not execute anything again.
+  case known(CommandLedgerRecord)
+}
+
 public enum CommandLedgerError: Error, Equatable, Sendable {
   case commandIDCollision
   case missingCommand
@@ -122,6 +132,25 @@ public protocol CommandLedgering: Sendable {
     command: ClientCommand,
     at date: Date
   ) async throws -> CommandRegistration
+
+  /// Claims `(deviceID, commandID)` under an explicitly supplied semantic
+  /// digest, which is the network gateway's notion of command identity (plan
+  /// §2 invariant 12).
+  ///
+  /// It exists alongside ``register(deviceID:command:at:)`` because that
+  /// method derives its digest from the whole `ClientCommand`, including
+  /// `issuedAt`. An honest retry after a reconnect carries a new `issuedAt`
+  /// and would look like a collision; the gateway's digest deliberately
+  /// excludes it. Reusing the key with a different digest, or from a
+  /// different device, throws
+  /// ``CommandLedgerError/commandIDCollision``.
+  func claim(
+    deviceID: UUID,
+    commandID: UUID,
+    kind: CompanionCommandKind,
+    semanticDigest: String,
+    at date: Date
+  ) async throws -> NetworkCommandClaim
 
   func markSubmitted(
     commandID: UUID,
@@ -180,6 +209,32 @@ public actor InMemoryCommandLedger {
     )
     records[command.commandID] = record
     return .accepted(record)
+  }
+
+  public func claim(
+    deviceID: UUID,
+    commandID: UUID,
+    kind: CompanionCommandKind,
+    semanticDigest: String,
+    at date: Date = Date()
+  ) throws -> NetworkCommandClaim {
+    if let existing = records[commandID] {
+      guard existing.deviceID == deviceID, existing.requestDigest == semanticDigest else {
+        throw CommandLedgerError.commandIDCollision
+      }
+      return .known(existing)
+    }
+    let record = CommandLedgerRecord(
+      commandID: commandID,
+      deviceID: deviceID,
+      commandKind: kind,
+      requestDigest: semanticDigest,
+      state: .submitting,
+      createdAt: date,
+      updatedAt: date
+    )
+    records[commandID] = record
+    return .claimed(record)
   }
 
   public func markSubmitted(
