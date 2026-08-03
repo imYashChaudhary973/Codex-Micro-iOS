@@ -51,6 +51,10 @@ public enum ListenerLogCode: String, CaseIterable, Sendable {
   case idleExpired = "idle_expired"
   /// A connection completed authentication.
   case connectionAuthenticated = "connection_authenticated"
+  /// A post-authentication application message was refused.
+  case applicationMessageRejected = "application_message_rejected"
+  /// One already-authorized observation batch was sealed and written.
+  case observationDelivered = "observation_delivered"
   /// A handshake message was refused by its per-source ceiling.
   case handshakeRateExceeded = "handshake_rate_exceeded"
   /// A peer exceeded the pre-upgrade byte budget.

@@ -265,6 +265,7 @@ public struct DenyingListenerHandshakeHandler: ListenerHandshakeHandling {
 public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
   private let pairing: PairingCoordinator?
   private let session: SessionCoordinator
+  private let frames: ListenerSessionFrameRegistry
 
   /// Creates the handler.
   ///
@@ -272,10 +273,22 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
   ///   - pairing: The pairing coordinator, or `nil` when no pairing session
   ///     may be claimed. A `nil` coordinator refuses every pairing message.
   ///   - session: The authenticated-session coordinator.
-  public init(pairing: PairingCoordinator?, session: SessionCoordinator) {
+  ///   - frames: Where a completed authentication's directional codecs wait
+  ///     until the connection that authenticated claims them. Ownership
+  ///     transfers exactly once, because their counters must never be
+  ///     advanced from two places.
+  public init(
+    pairing: PairingCoordinator?,
+    session: SessionCoordinator,
+    frames: ListenerSessionFrameRegistry = ListenerSessionFrameRegistry()
+  ) {
     self.pairing = pairing
     self.session = session
+    self.frames = frames
   }
+
+  /// The registry a listener wires to its observation handler.
+  public var frameRegistry: ListenerSessionFrameRegistry { frames }
 
   public func handle(
     _ envelope: ListenerHandshakeEnvelope,
@@ -297,6 +310,7 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
 
   public func abandon(connectionID: UUID) async {
     await session.abandonHandshake(connectionID: connectionID)
+    await frames.discardFrames(connectionID: connectionID)
   }
 
   private func handlePairingRequest(_ payload: Data) async -> ListenerHandshakeOutcome {
@@ -352,6 +366,14 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
     else {
       return .close(.authenticationFailed)
     }
+    await frames.store(
+      ListenerSessionFrames(
+        deviceID: authentication.session.identity.deviceID,
+        inbound: authentication.session.inbound,
+        outbound: authentication.session.outbound
+      ),
+      connectionID: connectionID
+    )
     return .authenticated(reply: nil, session: authentication.session.identity)
   }
 }

@@ -262,6 +262,8 @@ public actor HardenedWSSListener {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {
@@ -340,6 +342,8 @@ public actor HardenedWSSListener {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {
@@ -483,6 +487,11 @@ public actor HardenedWSSListener {
 /// 5. ``ListenerBinaryFramePolicy`` — binary-only policy, ping replies, and
 ///    the frame/bytes boundary.
 /// 6. ``ListenerHandshakeGateHandler`` — the pre-authentication allowlist.
+/// 7. ``ListenerObservationHandler`` — tail-most, and reachable only after
+///    authentication: it opens every inbound sealed frame and seals every
+///    outbound delivery. It sits behind the gate so no unauthenticated byte
+///    can reach a frame codec, and behind every ceiling so sealed traffic is
+///    metered exactly like handshake traffic.
 ///
 /// Application bytes therefore cross every bound before any handshake state
 /// machine sees them, and nothing the peer can drive reaches the wire
@@ -498,6 +507,8 @@ public enum ListenerPipeline {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {
@@ -546,6 +557,12 @@ public enum ListenerPipeline {
         ticket: ticket,
         handshake: handshake,
         authenticationDeadline: .seconds(Int64(ceilings.authenticationDeadlineSeconds)),
+        logger: logger
+      ),
+      ListenerObservationHandler(
+        connectionID: connectionID,
+        observation: observation,
+        frameProvider: frameProvider,
         logger: logger
       ),
     ]
