@@ -18,10 +18,13 @@ let package = Package(
     .executable(name: "codex-micro-bridge", targets: ["CodexMicroBridge"]),
   ],
   dependencies: [
-    // ADR §4 pins: swift-certificates 1.19.4 resolves the authorized
-    // transitives swift-crypto 4.5.1 and swift-asn1 1.7.1. swift-nio and
-    // swift-nio-transport-services are adopted at Step 2.7, not here.
-    .package(url: "https://github.com/apple/swift-certificates.git", exact: "1.19.4")
+    // The complete, closed ADR §4 pin set. These three direct pins resolve
+    // exactly the five authorized transitives (swift-atomics 1.3.1,
+    // swift-collections 1.6.0, swift-system 1.7.5, swift-crypto 4.5.1,
+    // swift-asn1 1.7.1). No other repository may be declared or resolved.
+    .package(url: "https://github.com/apple/swift-certificates.git", exact: "1.19.4"),
+    .package(url: "https://github.com/apple/swift-nio.git", exact: "2.101.3"),
+    .package(url: "https://github.com/apple/swift-nio-transport-services.git", exact: "1.28.0"),
   ],
   targets: [
     .target(name: "CodexAppServer"),
@@ -45,9 +48,14 @@ let package = Package(
         "CompanionCrypto",
         "CompanionProtocol",
         .product(name: "X509", package: "swift-certificates"),
+        .product(name: "NIOCore", package: "swift-nio"),
+        .product(name: "NIOHTTP1", package: "swift-nio"),
+        .product(name: "NIOWebSocket", package: "swift-nio"),
+        .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
       ],
       linkerSettings: [
-        .linkedFramework("Security")
+        .linkedFramework("Security"),
+        .linkedFramework("SystemConfiguration"),
       ]
     ),
     .executableTarget(
@@ -81,6 +89,10 @@ let package = Package(
         "CompanionProtocol",
         "MacBridgeServer",
         .product(name: "X509", package: "swift-certificates"),
+        .product(name: "NIOCore", package: "swift-nio"),
+        .product(name: "NIOEmbedded", package: "swift-nio"),
+        .product(name: "NIOHTTP1", package: "swift-nio"),
+        .product(name: "NIOWebSocket", package: "swift-nio"),
       ]
     ),
   ]
