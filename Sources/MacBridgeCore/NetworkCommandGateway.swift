@@ -109,10 +109,15 @@ extension CodexRuntimeSupervisor: NetworkRuntimeReadiness {
 /// between them leaves a claimed record that resolves to `outcomeUnknown`
 /// rather than permitting a silent second call.
 public actor NetworkCommandGateway {
-  /// The exact P0 semantic mutation allowlist (plan §9). Every other kind is
-  /// denied, including approvals, which stay closed for all of Phase 2.
+  /// The exact semantic mutation allowlist. Every other kind is denied,
+  /// including approvals, which stay closed for all of Phase 2.
+  ///
+  /// `interruptTurn` and `markThreadRead` are the P0 pair (plan §9);
+  /// `sendPrompt` is P1 and is gated a second time by the grant, which must
+  /// explicitly carry `.runAgent` — the pairing default does not, so a freshly
+  /// paired device cannot start a turn no matter what it sends.
   public static let allowedCommandKinds: Set<CompanionCommandKind> = [
-    .interruptTurn, .markThreadRead,
+    .interruptTurn, .markThreadRead, .sendPrompt,
   ]
 
   private let authority: DeviceGrantAuthority
@@ -121,6 +126,8 @@ public actor NetworkCommandGateway {
   private let sessions: any NetworkSessionVerifying
   private let runtime: any NetworkRuntimeReadiness
   private let responder: any CodexApprovalResponding
+  private let turnStarter: any CodexTurnStarting
+  private let workspaceRoots: any WorkspaceRootResolving
   private let readCursors: DeviceReadCursorStore
   private let hostProfile: MobileActionProfile
 
@@ -131,6 +138,8 @@ public actor NetworkCommandGateway {
     sessions: any NetworkSessionVerifying,
     runtime: any NetworkRuntimeReadiness,
     responder: any CodexApprovalResponding,
+    turnStarter: any CodexTurnStarting,
+    workspaceRoots: any WorkspaceRootResolving = DeniedWorkspaceRootResolver(),
     readCursors: DeviceReadCursorStore,
     hostProfile: MobileActionProfile = .runWorkspace
   ) {
@@ -140,6 +149,8 @@ public actor NetworkCommandGateway {
     self.sessions = sessions
     self.runtime = runtime
     self.responder = responder
+    self.turnStarter = turnStarter
+    self.workspaceRoots = workspaceRoots
     self.readCursors = readCursors
     self.hostProfile = hostProfile
   }
@@ -334,7 +345,9 @@ public actor NetworkCommandGateway {
         plan, threadID: threadID, throughSequence: throughSequence, now: now)
     case .interruptTurn(let threadID, let turnID):
       return await performInterrupt(plan, threadID: threadID, turnID: turnID, now: now)
-    case .selectThread, .startThread, .sendPrompt, .steerTurn, .resolveApproval:
+    case .sendPrompt(let threadID, let prompt, _):
+      return await performSendPrompt(plan, threadID: threadID, prompt: prompt, now: now)
+    case .selectThread, .startThread, .steerTurn, .resolveApproval:
       // Unreachable: the allowlist refused these before the claim existed.
       return await finish(
         plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
@@ -407,6 +420,53 @@ public actor NetworkCommandGateway {
         commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
       return .outcomeUnknown(await currentRecord(plan, now: now))
     }
+    return await finish(
+      plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
+  }
+
+  /// Starts exactly one phone-originated turn.
+  ///
+  /// Everything about *how* the turn runs is resolved on the Mac from the
+  /// effective profile the gateway already intersected: sandbox, writable
+  /// roots, network access, and approval policy. The phone contributes a
+  /// thread and a prompt, and `ClientCommandBody` gives it no field for
+  /// anything else — so there is no permissive setting to reject, only one
+  /// that cannot be expressed.
+  ///
+  /// Unlike the interrupt, the turn identifier is unknown until the call
+  /// returns, so the ledger is marked `submitted` **after** it. Both orders
+  /// leave a non-terminal record if the bridge stops mid-flight, and a
+  /// non-terminal record is crash-ambiguous either way — it resolves to
+  /// `outcomeUnknown` and is never resent.
+  private func performSendPrompt(
+    _ plan: ExecutionPlan,
+    threadID: String,
+    prompt: String,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    let roots = plan.projectID.map { workspaceRoots.writableRoots(forProjectID: $0) } ?? []
+    let policy = PhoneTurnPolicy.resolve(
+      effectiveProfile: plan.effectiveProfile, writableRoots: roots)
+
+    let turnID: String
+    do {
+      turnID = try await turnStarter.startTurn(
+        threadID: threadID, prompt: prompt, policy: policy)
+    } catch {
+      // The turn may or may not have started. It is never retried; the user
+      // confirms the true outcome on the Mac.
+      try? await ledger.markOutcomeUnknown(
+        commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
+
+    try? await ledger.markSubmitted(
+      commandID: plan.command.commandID,
+      threadID: threadID,
+      turnID: turnID,
+      requestID: nil,
+      at: now
+    )
     return await finish(
       plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
   }

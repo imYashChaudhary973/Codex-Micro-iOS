@@ -51,6 +51,46 @@ actor FakeCommandResponder: CodexApprovalResponding {
   }
 }
 
+/// Deterministic turn starter that records every phone-originated turn.
+actor FakeTurnStarter: CodexTurnStarting {
+  private(set) var started: [(threadID: String, prompt: String, policy: PhoneTurnPolicy)] = []
+  private var failure: (any Error)?
+  private var nextTurnID = "turn-started-1"
+
+  func setFailure(_ error: (any Error)?) { failure = error }
+  func setNextTurnID(_ value: String) { nextTurnID = value }
+
+  var startCount: Int { started.count }
+
+  func startTurn(
+    threadID: String,
+    prompt: String,
+    policy: PhoneTurnPolicy
+  ) async throws -> String {
+    started.append((threadID, prompt, policy))
+    if let failure { throw failure }
+    return nextTurnID
+  }
+}
+
+/// Deterministic writable-root source.
+final class FakeWorkspaceRootResolver: WorkspaceRootResolving, @unchecked Sendable {
+  private let lock = NSLock()
+  private var roots: [String: [String]] = [:]
+
+  func writableRoots(forProjectID projectID: String) -> [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return roots[projectID] ?? []
+  }
+
+  func setRoots(_ values: [String], for projectID: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    roots[projectID] = values
+  }
+}
+
 /// Deterministic runtime readiness.
 final class FakeNetworkRuntime: NetworkRuntimeReadiness, @unchecked Sendable {
   private let lock = NSLock()
@@ -135,12 +175,11 @@ final class NetworkCommandGatewayTests: XCTestCase {
     XCTAssertEqual(outcome, .denied(.attachmentsUnsupported))
   }
 
-  func testEveryCommandOutsideTheP0AllowlistIsRejected() async throws {
+  func testEveryCommandOutsideTheAllowlistIsRejected() async throws {
     let world = try await World()
     let bodies: [ClientCommandBody] = [
       .selectThread(threadID: "thread-a"),
       .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: []),
-      .sendPrompt(threadID: "thread-a", prompt: "hi", attachmentIDs: []),
       .steerTurn(threadID: "thread-a", turnID: "turn-1", prompt: "hi"),
     ]
 
@@ -151,9 +190,27 @@ final class NetworkCommandGatewayTests: XCTestCase {
     }
   }
 
-  func testTheAllowlistIsExactlyTheTwoP0Mutations() {
+  func testTheAllowlistIsExactlyTheEnabledMutations() {
     XCTAssertEqual(
-      NetworkCommandGateway.allowedCommandKinds, [.interruptTurn, .markThreadRead])
+      NetworkCommandGateway.allowedCommandKinds,
+      [.interruptTurn, .markThreadRead, .sendPrompt]
+    )
+  }
+
+  /// `sendPrompt` is on the allowlist but gated a second time by the grant.
+  /// The Step 2.9 fixture's grant has no `.runAgent`, so it is still denied —
+  /// just for the right reason.
+  func testSendPromptIsAllowlistedButStillNeedsTheRunAgentGrant() async throws {
+    let world = try await World()
+    let command = try ClientCommand(
+      commandID: UUID(),
+      issuedAt: World.now,
+      body: .sendPrompt(threadID: "thread-a", prompt: "hi", attachmentIDs: [])
+    )
+
+    let outcome = await world.gateway.execute(command: command, context: world.context)
+
+    XCTAssertEqual(outcome, .denied(.capabilityMissing))
   }
 
   func testClosedSurfacesAreRejectedBeforeAnyLedgerClaimExists() async throws {
@@ -511,6 +568,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
     let table = ThreadProjectTable()
     let storage = InMemoryGrantAuthorityStore()
     let responder = FakeCommandResponder()
+    let turnStarter = FakeTurnStarter()
+    let workspaceRoots = FakeWorkspaceRootResolver()
     let readCursors: DeviceReadCursorStore
     let context: NetworkCommandContext
     let otherSessionID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
@@ -548,6 +607,8 @@ final class NetworkCommandGatewayTests: XCTestCase {
         sessions: sessions,
         runtime: runtime,
         responder: responder,
+        turnStarter: turnStarter,
+        workspaceRoots: workspaceRoots,
         readCursors: readCursors
       )
     }

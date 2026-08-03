@@ -320,6 +320,14 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     throw CodexRuntimeRequestError.notReady
   }
 
+  func startTurn(
+    threadID: String,
+    prompt: String,
+    policy: PhoneTurnPolicy
+  ) async throws -> String {
+    throw CodexRuntimeRequestError.notReady
+  }
+
   func yield(_ event: AppServerEvent) {
     continuation.yield(event)
   }
