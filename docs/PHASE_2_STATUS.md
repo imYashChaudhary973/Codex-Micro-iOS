@@ -620,9 +620,20 @@ The matrix is a checklist, not a test suite. What the host checks on-device is e
 
 Seven cases have a real precondition. The strongest is the Secure Enclave check: it creates a P-256 key with `kSecAttrIsPermanent: false` and discards it, which cannot pass in a simulator or an unsigned build, and which writes nothing — a probe that left a key behind would be indistinguishable from the identity the reinstall case exists to watch. The other four (`ipChange`, `foregroundBackgroundReauth`, `macRestart`, `keychainLockAndReboot`) are properties of a running system across a real disruption and report `physicalOnly` rather than inventing a check.
 
+### The live-Codex steer probe
+
+`codex-micro-spike steer-probe --confirm-live-turn` exists to settle the two app-server calls Phase 2 wrote to the documented architecture and never confirmed: the `workspaceWrite` form of `turn/start`, and `turn/steer` in full. Step 2.11 recorded that `turn/steer` appears nowhere in this repository's proven surface, so the steering path may not work at all.
+
+It **drives the production types rather than a hand-rolled copy**: the request bodies come from `PhoneTurnPolicy.turnStartParameters` and `LiveCodexRuntimeSession.steerTurn`, so what it confirms is the exact wire shape the bridge sends. A probe that rebuilt the JSON would prove only that *some* shape works.
+
+Isolation: an ephemeral thread rooted in a fresh temporary directory that is also its only writable root, network access off, approval policy `untrusted`, and the directory removed afterwards. The turn is interrupted rather than run to completion.
+
+**The probe has been built but not run.** It requires a live Codex turn, which consumes allowance; the run was not performed by this session. `turn/steer` and the `workspaceWrite` form of `turn/start` therefore remain **unverified**, exactly as they were at the end of Step 2.11. The installed Codex is 0.146.0, which is the single version `CodexCompatibilityPolicy.phase1` supports.
+
 ### What Step 2.14 still owes
 
 - **The app has not been installed on a device.** It is signed and provisioned; installation was not performed by this session.
+- **The steer probe has not been run.** It builds; nothing has executed it against a live Codex.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -652,6 +663,9 @@ Acceptance host, development-signed (-allowProvisioningUpdates): BUILD SUCCEEDED
     NSBonjourServices == [_codexmicro._tcp], usage description present
 App installed on a physical device: no
 Physical acceptance cases run: none — 0 of 11
+Installed Codex: codex-cli 0.146.0 — the single version phase1 policy supports
+Live steer probe (codex-micro-spike steer-probe): builds; NOT run. turn/steer and
+  the workspaceWrite form of turn/start remain unverified against a live Codex
 Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run since
 Phase 2 production listener added: yes — off by default. A production enabled
   configuration now exists and requires a ListenerEnablement that only an explicit

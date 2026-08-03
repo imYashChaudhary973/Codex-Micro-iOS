@@ -16,6 +16,7 @@ struct CodexMicroSpike {
       guard
         [
           "compatibility", "doctor", "threads", "resume-recent", "restart-probe", "smoke-turn",
+          "steer-probe",
         ].contains(
           command
         )
@@ -58,6 +59,8 @@ struct CodexMicroSpike {
           )
         case "smoke-turn":
           try await runSmokeTurn(client: client, arguments: Array(arguments.dropFirst()))
+        case "steer-probe":
+          try await runSteerProbe(client: client, arguments: Array(arguments.dropFirst()))
         default:
           preconditionFailure("Command was validated before app-server startup.")
         }
@@ -612,6 +615,99 @@ struct CodexMicroSpike {
           [--approval-cancel]           Cancel a harmless command approval request
           [--file-approval-cancel]      Cancel a disposable file-change request
       """)
+  }
+}
+
+extension CodexMicroSpike {
+  /// Proves the two app-server calls Phase 2 wrote to the documented
+  /// architecture but never confirmed: the `workspaceWrite` form of
+  /// `turn/start`, and `turn/steer` in full.
+  ///
+  /// Steps 2.10 and 2.11 both recorded these as unverified, and Step 2.11
+  /// went further: `turn/steer` appears nowhere in this repository's proven
+  /// surface, so the steering path might not work at all. A probe is the only
+  /// thing that settles it.
+  ///
+  /// **It drives the production types, not a hand-rolled copy.** The request
+  /// bodies come from `PhoneTurnPolicy.turnStartParameters` and
+  /// `LiveCodexRuntimeSession.steerTurn`, so what is confirmed here is the
+  /// exact wire shape the bridge sends. A probe that rebuilt the JSON would
+  /// prove only that *some* shape works.
+  ///
+  /// Isolation: an ephemeral thread rooted in a fresh temporary directory,
+  /// which is also the only writable root. Network access is off and the
+  /// approval policy is `untrusted`, so the turn cannot reach the network or
+  /// escalate. The directory is removed afterwards.
+  static func runSteerProbe(
+    client: CodexAppServerClient,
+    arguments: [String]
+  ) async throws {
+    guard arguments == ["--confirm-live-turn"] else {
+      throw SpikeError.liveTurnConfirmationRequired
+    }
+
+    let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("codex-micro-steer-probe-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let root = scratch.path
+
+    let threadResponse = try await client.request(
+      method: "thread/start",
+      params: .object([
+        "ephemeral": .bool(true),
+        "cwd": .string(root),
+        "approvalPolicy": .string("untrusted"),
+        "sandbox": .string("workspace-write"),
+        "serviceName": .string("codex_micro_phase2_steer_probe"),
+      ])
+    )
+    guard let threadID = threadResponse["thread"]["id"].string else {
+      throw SpikeError.missingResponseID("thread/start")
+    }
+
+    // The production policy, resolved exactly as the gateway resolves it for a
+    // device whose effective profile permits workspace work.
+    let policy = PhoneTurnPolicy.resolve(
+      effectiveProfile: .runWorkspace,
+      writableRoots: [root]
+    )
+    let session = LiveCodexRuntimeSession(client: client)
+
+    let turnID = try await session.startTurn(
+      threadID: threadID,
+      prompt: "Without using tools or reading files, write a detailed 2,000-word "
+        + "explanation of how event-driven clients recover from a dropped connection.",
+      policy: policy
+    )
+
+    try await TurnEventRecorder.waitUntilStarted(events: client.events, turnID: turnID)
+
+    var steerAccepted = false
+    var steerFailure: String?
+    do {
+      try await session.steerTurn(
+        threadID: threadID,
+        turnID: turnID,
+        prompt: "Stop and reply with the single word: steered."
+      )
+      steerAccepted = true
+    } catch {
+      steerFailure = "\(error)"
+    }
+
+    try? await client.interruptTurn(threadID: threadID, turnID: turnID)
+
+    print("Codex Micro Phase 2 steer probe")
+    print("  isolation: ephemeral thread, fresh temp root, network-disabled")
+    print("  sandbox requested: \(policy.sandbox.rawValue)")
+    print("  writable roots: \(policy.writableRoots.count)")
+    print("  turn/start (workspaceWrite form): accepted, turn \(turnID)")
+    if steerAccepted {
+      print("  turn/steer: accepted")
+    } else {
+      print("  turn/steer: REFUSED — \(steerFailure ?? "unknown")")
+    }
   }
 }
 
