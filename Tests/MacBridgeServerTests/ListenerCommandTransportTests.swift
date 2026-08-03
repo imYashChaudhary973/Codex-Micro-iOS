@@ -88,7 +88,7 @@ final class ListenerCommandTransportTests: XCTestCase {
     let world = try await World(deviceID: deviceID, sessionID: sessionID)
 
     try await world.authenticate()
-    try world.sendCommand(try interruptCommand())
+    try await world.sendCommand(try interruptCommand())
     await world.settle()
 
     let received = await world.commands.received
@@ -103,10 +103,10 @@ final class ListenerCommandTransportTests: XCTestCase {
     await world.commands.setOutcome(.denied(.capabilityMissing))
 
     try await world.authenticate()
-    try world.sendCommand(try interruptCommand())
+    try await world.sendCommand(try interruptCommand())
     await world.settle()
 
-    let result = try world.readCommandResult()
+    let result = try await world.readCommandResult()
     XCTAssertEqual(result.commandID, commandID)
     XCTAssertEqual(result.outcome, .denied)
     XCTAssertEqual(result.denialReason, .capabilityMissing)
@@ -117,10 +117,10 @@ final class ListenerCommandTransportTests: XCTestCase {
     await world.commands.setOutcome(.outcomeUnknown)
 
     try await world.authenticate()
-    try world.sendCommand(try interruptCommand())
+    try await world.sendCommand(try interruptCommand())
     await world.settle()
 
-    let result = try world.readCommandResult()
+    let result = try await world.readCommandResult()
     XCTAssertEqual(result.outcome, .outcomeUnknown)
     XCTAssertNil(result.denialReason)
   }
@@ -131,10 +131,11 @@ final class ListenerCommandTransportTests: XCTestCase {
     let world = try await World(deviceID: deviceID, sessionID: sessionID)
 
     try await world.authenticate()
-    try world.send(kind: .commandRequest, body: Data(#"{"commandID":"not-a-uuid"}"#.utf8))
+    try await world.send(kind: .commandRequest, body: Data(#"{"commandID":"not-a-uuid"}"#.utf8))
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .protocolViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .protocolViolation)
     let count = await world.commands.callCount
     XCTAssertEqual(count, 0)
   }
@@ -146,10 +147,11 @@ final class ListenerCommandTransportTests: XCTestCase {
         .utf8)
 
     try await world.authenticate()
-    try world.send(kind: .commandRequest, body: body)
+    try await world.send(kind: .commandRequest, body: body)
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .protocolViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .protocolViolation)
     let count = await world.commands.callCount
     XCTAssertEqual(count, 0)
   }
@@ -158,10 +160,11 @@ final class ListenerCommandTransportTests: XCTestCase {
     let world = try await World(deviceID: deviceID, sessionID: sessionID)
 
     try await world.authenticate()
-    try world.send(kind: .commandResult, body: Data(#"{}"#.utf8))
+    try await world.send(kind: .commandResult, body: Data(#"{}"#.utf8))
     await world.settle()
 
-    XCTAssertEqual(try world.readCloseReason(), .protocolViolation)
+    let reason = try await world.readCloseReason()
+    XCTAssertEqual(reason, .protocolViolation)
     let count = await world.commands.callCount
     XCTAssertEqual(count, 0)
   }
@@ -169,12 +172,13 @@ final class ListenerCommandTransportTests: XCTestCase {
   func testACommandBeforeAuthenticationNeverReachesTheGateway() async throws {
     let world = try await World(deviceID: deviceID, sessionID: sessionID)
 
-    world.writeInbound(Data(repeating: 0x02, count: 48))
+    await world.writeInbound(Data(repeating: 0x02, count: 48))
     await world.settle()
 
     let count = await world.commands.callCount
     XCTAssertEqual(count, 0)
-    XCTAssertNil(try world.readOutboundBytes())
+    let outbound = try await world.readOutboundBytes()
+    XCTAssertNil(outbound)
   }
 
   // MARK: - Fixtures
@@ -189,7 +193,7 @@ final class ListenerCommandTransportTests: XCTestCase {
 
   /// One embedded authenticated connection with device-side codecs.
   private final class World {
-    let channel: EmbeddedChannel
+    let channel: NIOAsyncTestingChannel
     let commands = FakeListenerCommandHandler()
     let registry = ListenerSessionFrameRegistry()
     private var device: ListenerSessionFrames
@@ -216,8 +220,8 @@ final class ListenerCommandTransportTests: XCTestCase {
         outbound: try SecureFrameSealer(
           key: clientKey, connectionID: sessionID, direction: .clientToServer)
       )
-      channel = EmbeddedChannel()
-      try channel.pipeline.syncOperations.addHandler(
+      channel = NIOAsyncTestingChannel()
+      try await channel.pipeline.addHandler(
         ListenerObservationHandler(
           connectionID: connectionID,
           observation: DenyingListenerObservationHandler(),
@@ -226,57 +230,69 @@ final class ListenerCommandTransportTests: XCTestCase {
           logger: DiscardingListenerLogger()
         )
       )
-      try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0)).wait()
+      try await channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0))
     }
 
     func authenticate() async throws {
       await registry.store(hostFrames, connectionID: connectionID)
-      channel.pipeline.fireUserInboundEventTriggered(ListenerConnectionAuthenticated())
+      let pipeline = channel.pipeline
+      try await channel.testingEventLoop.executeInContext {
+        pipeline.fireUserInboundEventTriggered(ListenerConnectionAuthenticated())
+      }
       await settle()
     }
 
+    /// Drains the testing loop and any awaiting Tasks.
+    ///
+    /// The handler hands work to a `Task` and hops back through
+    /// `eventLoop.execute`, so both have to be driven. `NIOAsyncTestingChannel`
+    /// is used rather than `EmbeddedChannel` precisely because its loop is
+    /// safe to drive from whichever thread resumes after an `await`.
     func settle() async {
-      for _ in 0..<400 {
+      for _ in 0..<64 {
         await Task.yield()
-        channel.embeddedEventLoop.run()
+        await channel.testingEventLoop.run()
       }
     }
 
-    func writeInbound(_ bytes: Data) {
+    func writeInbound(_ bytes: Data) async {
       var buffer = channel.allocator.buffer(capacity: bytes.count)
       buffer.writeBytes(bytes)
-      _ = try? channel.writeInbound(buffer)
+      _ = try? await channel.writeInbound(buffer)
     }
 
-    func sendCommand(_ command: ClientCommand) throws {
+    func sendCommand(_ command: ClientCommand) async throws {
       let encoder = JSONEncoder()
       encoder.outputFormatting = [.sortedKeys]
-      try send(kind: .commandRequest, body: try encoder.encode(command))
+      try await send(kind: .commandRequest, body: try encoder.encode(command))
     }
 
-    func send(kind: ListenerApplicationKind, body: Data) throws {
+    func send(kind: ListenerApplicationKind, body: Data) async throws {
       let envelope = try ListenerApplicationEnvelope(kind: kind, payload: body)
-      writeInbound(try device.outbound.seal(try envelope.encoded()))
+      await writeInbound(try device.outbound.seal(try envelope.encoded()))
     }
 
-    func readOutboundBytes() throws -> Data? {
-      guard var buffer = try channel.readOutbound(as: ByteBuffer.self) else { return nil }
+    func readOutboundBytes() async throws -> Data? {
+      guard var buffer = try await channel.readOutbound(as: ByteBuffer.self) else { return nil }
       return buffer.readData(length: buffer.readableBytes)
     }
 
-    func readEnvelope() throws -> ListenerApplicationEnvelope? {
-      guard let bytes = try readOutboundBytes() else { return nil }
+    func readEnvelope() async throws -> ListenerApplicationEnvelope? {
+      guard let bytes = try await readOutboundBytes() else { return nil }
       return try ListenerApplicationEnvelope.decode(try device.inbound.open(bytes))
     }
 
-    func readCommandResult() throws -> SecureCommandResult {
-      let envelope = try XCTUnwrap(try readEnvelope())
+    func readCommandResult() async throws -> SecureCommandResult {
+      let decoded = try await readEnvelope()
+      let envelope = try XCTUnwrap(decoded)
       XCTAssertEqual(envelope.kind, .commandResult)
       return try JSONDecoder().decode(SecureCommandResult.self, from: envelope.payload)
     }
 
-    func readCloseReason() throws -> SecureCloseReason? {
-      guard let envelope = try readEnvelope(), envelope.kind == .closeNotice else { return nil }
+    func readCloseReason() async throws -> SecureCloseReason? {
+      guard let envelope = try await readEnvelope(), envelope.kind == .closeNotice else {
+        return nil
+      }
       return try JSONDecoder().decode(SecureCloseNotice.self, from: envelope.payload).reason
     }
   }
