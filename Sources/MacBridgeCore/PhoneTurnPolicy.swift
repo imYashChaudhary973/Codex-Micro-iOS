@@ -127,6 +127,18 @@ public protocol CodexTurnStarting: Sendable {
   ) async throws -> String
 }
 
+/// Steers exactly one in-progress phone-originated turn.
+///
+/// Kept separate from ``CodexTurnStarting`` because the authority differs:
+/// starting a turn chooses a policy, while steering may only continue one
+/// that already exists. Nothing on this seam can carry a policy field, so
+/// steering cannot widen a turn even if a caller wanted it to.
+public protocol CodexTurnSteering: Sendable {
+  func steerTurn(threadID: String, turnID: String, prompt: String) async throws
+}
+
+extension CodexRuntimeSupervisor: CodexTurnSteering {}
+
 extension CodexRuntimeSupervisor: CodexTurnStarting {
   public func startTurn(
     threadID: String,

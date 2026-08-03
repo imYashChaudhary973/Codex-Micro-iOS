@@ -113,11 +113,13 @@ public actor NetworkCommandGateway {
   /// including approvals, which stay closed for all of Phase 2.
   ///
   /// `interruptTurn` and `markThreadRead` are the P0 pair (plan §9);
-  /// `sendPrompt` is P1 and is gated a second time by the grant, which must
-  /// explicitly carry `.runAgent` — the pairing default does not, so a freshly
-  /// paired device cannot start a turn no matter what it sends.
+  /// `sendPrompt` and `steerTurn` are P1 and are gated a second time by the
+  /// grant, which must explicitly carry `.runAgent` — the pairing default does
+  /// not, so a freshly paired device cannot start or steer a turn no matter
+  /// what it sends. `steerTurn` is gated a **third** time, by the turn's own
+  /// recorded policy.
   public static let allowedCommandKinds: Set<CompanionCommandKind> = [
-    .interruptTurn, .markThreadRead, .sendPrompt,
+    .interruptTurn, .markThreadRead, .sendPrompt, .steerTurn,
   ]
 
   private let authority: DeviceGrantAuthority
@@ -127,6 +129,8 @@ public actor NetworkCommandGateway {
   private let runtime: any NetworkRuntimeReadiness
   private let responder: any CodexApprovalResponding
   private let turnStarter: any CodexTurnStarting
+  private let turnSteerer: any CodexTurnSteering
+  private let turnPolicies: TurnPolicyRegistry
   private let workspaceRoots: any WorkspaceRootResolving
   private let readCursors: DeviceReadCursorStore
   private let hostProfile: MobileActionProfile
@@ -139,6 +143,8 @@ public actor NetworkCommandGateway {
     runtime: any NetworkRuntimeReadiness,
     responder: any CodexApprovalResponding,
     turnStarter: any CodexTurnStarting,
+    turnSteerer: any CodexTurnSteering,
+    turnPolicies: TurnPolicyRegistry = TurnPolicyRegistry(),
     workspaceRoots: any WorkspaceRootResolving = DeniedWorkspaceRootResolver(),
     readCursors: DeviceReadCursorStore,
     hostProfile: MobileActionProfile = .runWorkspace
@@ -150,6 +156,8 @@ public actor NetworkCommandGateway {
     self.runtime = runtime
     self.responder = responder
     self.turnStarter = turnStarter
+    self.turnSteerer = turnSteerer
+    self.turnPolicies = turnPolicies
     self.workspaceRoots = workspaceRoots
     self.readCursors = readCursors
     self.hostProfile = hostProfile
@@ -347,7 +355,10 @@ public actor NetworkCommandGateway {
       return await performInterrupt(plan, threadID: threadID, turnID: turnID, now: now)
     case .sendPrompt(let threadID, let prompt, _):
       return await performSendPrompt(plan, threadID: threadID, prompt: prompt, now: now)
-    case .selectThread, .startThread, .steerTurn, .resolveApproval:
+    case .steerTurn(let threadID, let turnID, let prompt):
+      return await performSteerTurn(
+        plan, threadID: threadID, turnID: turnID, prompt: prompt, now: now)
+    case .selectThread, .startThread, .resolveApproval:
       // Unreachable: the allowlist refused these before the claim existed.
       return await finish(
         plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
@@ -467,6 +478,72 @@ public actor NetworkCommandGateway {
       requestID: nil,
       at: now
     )
+    // Record what the turn actually runs under, so a later steer can be
+    // *proven* rather than assumed (plan Step 2.11).
+    await turnPolicies.record(
+      RecordedTurnPolicy(
+        threadID: threadID,
+        turnID: turnID,
+        effectiveProfile: plan.effectiveProfile,
+        policy: policy,
+        startedByDeviceID: plan.deviceID
+      )
+    )
+    return await finish(
+      plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
+  }
+
+  /// Steers exactly one in-progress turn.
+  ///
+  /// Steering is the one command whose authorization depends on something
+  /// other than the device: the turn's **own** effective policy. A turn
+  /// running more permissively than the device's current profile cannot be
+  /// steered by it, and a turn the bridge cannot prove anything about — one
+  /// started in the IDE, or before a restart, or evicted from the bounded
+  /// registry — cannot be steered at all. Neither refusal makes an external
+  /// call.
+  ///
+  /// Steering never widens a turn: the seam carries no policy field, so the
+  /// turn keeps the sandbox, roots, network, and approval settings it began
+  /// with.
+  private func performSteerTurn(
+    _ plan: ExecutionPlan,
+    threadID: String,
+    turnID: String,
+    prompt: String,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    let authorization = await turnPolicies.authorizeSteering(
+      threadID: threadID,
+      turnID: turnID,
+      deviceEffectiveProfile: plan.effectiveProfile
+    )
+    guard case .success = authorization else {
+      return await finish(
+        plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
+        outcome: { _ in .denied(.actionProfileTooRestrictive) })
+    }
+
+    do {
+      try await ledger.markSubmitted(
+        commandID: plan.command.commandID,
+        threadID: threadID,
+        turnID: turnID,
+        requestID: nil,
+        at: now
+      )
+    } catch {
+      return await finish(
+        plan, state: .failed, resultCode: .invalidRequest, now: now, outcome: { .failed($0) })
+    }
+
+    do {
+      try await turnSteerer.steerTurn(threadID: threadID, turnID: turnID, prompt: prompt)
+    } catch {
+      try? await ledger.markOutcomeUnknown(
+        commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
     return await finish(
       plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
   }

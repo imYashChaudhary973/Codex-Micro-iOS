@@ -289,6 +289,8 @@ final class GatewayP0CommandTests: XCTestCase {
     let runtime = FakeNetworkRuntime()
     let responder = FakeCommandResponder()
     let turnStarter = FakeTurnStarter()
+    let turnSteerer = FakeTurnSteerer()
+    let turnPolicies = TurnPolicyRegistry()
     let workspaceRoots = FakeWorkspaceRootResolver()
     let readCursors: DeviceReadCursorStore
     let table = ThreadProjectTable()
@@ -329,6 +331,8 @@ final class GatewayP0CommandTests: XCTestCase {
         runtime: runtime,
         responder: responder,
         turnStarter: turnStarter,
+        turnSteerer: turnSteerer,
+        turnPolicies: turnPolicies,
         workspaceRoots: workspaceRoots,
         readCursors: readCursors
       )
