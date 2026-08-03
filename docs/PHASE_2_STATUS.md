@@ -677,9 +677,24 @@ codex-micro acceptance readiness
 
 The Secure Enclave line is the one that could not have come from a simulator or an unsigned build. **This is readiness, not acceptance** — zero of the eleven physical cases have been run.
 
+### Pairing wired end to end on the Mac
+
+The three gaps recorded above are closed on the Mac side.
+
+**The Enclave identity now signs.** `EnclaveHostStatementSigner` adapts the `.host` `BridgeIdentity` to both `PairingTranscriptSigner` and `SessionStatementSigner`. One key signs pairing transcripts, session statements, and rotation statements, which is safe rather than merely convenient: every signed statement is encoded through `CanonicalStatementDomain`, whose separator leads the bytes, so a signature over one can never verify as another. The `.host` role is enforced in the adapter, so the rule that `.tls` never signs a statement holds at every signing site rather than at one of them.
+
+**A completed pairing now produces a grant.** This was the largest of the three. `CoordinatorListenerHandshakeHandler` computed the verification phrase and **discarded it**, and discarded the completed `PairedDeviceProposal`. Dual confirmation therefore had no screen, and a successful pairing left the Mac holding nothing — the device would have reconnected and been refused as unknown. A `ListenerPairingObserving` seam now carries both facts out of the transport, which cannot import `MacBridgeCore` and has no view of its own. `PairingGrantRecorder` maps the proposal onto `addGrant` through a total switch, pinned to `observe`/`view` with an empty allowlist, so a freshly paired device can see nothing until the Mac user grants it a project.
+
+**The QR and phrase have a UI.** The Mac shows the QR while a session is live and the six words once the device claims. The phrase is carried in the view state as a `SecureShortAuthenticationString` rather than as rendered words, so the value confirmed to the coordinator is necessarily the value the words were rendered from — there is no parse step between display and confirmation that could disagree. The QR carries base64 text rather than raw canonical bytes, because a scanned code arrives as a `String` and pushing arbitrary bytes through that round-trip corrupts them.
+
+**The bridge packages as a signed `.app`.** `Scripts/package-bridge.sh` builds the release binary, assembles the bundle around the `Info.plist` that is already the source of truth for the ADR §12 keys, and signs with the development identity. Verified: `NSBonjourServices == [_codexmicro._tcp]`, `LSUIElement == true`, signature valid. `Info.plist` is now excluded from the SwiftPM target, because a resource lands in a nested `.bundle` where macOS never reads it — which would look like packaging succeeded while the keys stayed invisible.
+
+Eleven new tests. The pairing ones drive **both real state machines** — a real `PairingCoordinator` and a real `PairingDeviceEndpoint` exchanging the actual messages in order — rather than fabricating a proposal. `PairedDeviceProposal`'s initializer is internal on purpose, and widening it so a test could mint one would let the test assert something pairing never produces. That run is also what proves the property the six words exist for: both endpoints derive the same phrase from independently reconstructed transcripts.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
+- **The phone cannot pair yet.** The Mac side is complete and the device-side state machine exists and is exercised in-process, but the acceptance host has no camera scanner and no pinned WSS client, so nothing on the phone can reach the Mac. That client is the last piece before an end-to-end pairing can be attempted.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -689,9 +704,9 @@ The Secure Enclave line is the one that could not have come from a simulator or 
 ## Current verification evidence
 
 ```text
-Root swift test: 969 passed, 0 failed
+Root swift test: 980 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 80, CodexAppServerTests 18)
+   CodexMicroBridgeTests 91, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
@@ -728,6 +743,12 @@ Phase 2 production dependencies added: yes — the complete ADR §4 set, exactly
 Production Bonjour advertisement added: the record, its lifecycle, and the signed app's
   NSBonjourServices allowlist exist; the default publisher advertises nothing and no
   record has ever been published by this code
+Mac bridge packaged as a signed .app: yes — Scripts/package-bridge.sh, signed with the
+  development identity, NSBonjourServices and LSUIElement verified in the built bundle.
+  No record has been published and no socket bound by this code
+Pairing wired on the Mac: yes — Enclave identity signs, the phrase reaches a screen, and
+  a completed proposal becomes a stored observe-only grant. The phone half (camera scan
+  and pinned WSS client) does not exist, so no pairing has been attempted
 Listener reachable by a user: the menu control exists and is the only way to enable it;
   LAN access is off on every launch and enablement is never persisted. BridgeNetworkAssembly
   now constructs a real HardenedWSSListener over the Secure Enclave TLS provider and hands

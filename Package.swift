@@ -66,7 +66,13 @@ let package = Package(
       name: "CodexMicroBridge",
       dependencies: [
         "CompanionCrypto", "CompanionProtocol", "MacBridgeCore", "MacBridgeServer",
-      ]
+      ],
+      // Info.plist is the source of truth for the ADR §12 local-network keys
+      // and is copied into the .app by Scripts/package-bridge.sh. SwiftPM must
+      // not treat it as a bundle resource: a resource lands in a nested
+      // .bundle where macOS never reads it, which would look like packaging
+      // succeeded while the keys stayed invisible.
+      exclude: ["Info.plist"]
     ),
     .target(
       name: "CodexTestSupport",

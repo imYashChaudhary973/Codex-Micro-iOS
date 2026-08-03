@@ -17,6 +17,114 @@ import MacBridgeServer
 /// question from one module into a call on another and returns the answer
 /// unchanged.
 
+// MARK: - Secure Enclave identity → statement signers
+
+/// Signs pairing transcripts and session statements with the Mac's
+/// Enclave-backed `.host` key.
+///
+/// Both seams want the same thing — canonical bytes in, exactly 64 raw `r||s`
+/// bytes out — and ``BridgeIdentity/signStatement(_:)`` is that operation with
+/// the private key never leaving the Enclave (ADR §6).
+///
+/// **One key signs both, and that is safe rather than convenient.** Every
+/// signed statement in this system is encoded through
+/// `CanonicalStatementDomain`, whose separator leads the bytes: a pairing
+/// transcript is `codex-micro/pairing-transcript/v1`, a session statement is
+/// `codex-micro/session-auth-statement/v1`, a rotation statement is
+/// `codex-micro/rotation-statement/v1`. A signature over one can never verify
+/// as another, so re-using the host key across them is not a cross-protocol
+/// exposure. Sharing a key without that property would be.
+///
+/// **The role is enforced, not assumed.** The `.tls` identity serves TLS and
+/// must never sign a statement; `TLSRotationAuthority` already refuses a
+/// non-`.host` signer for rotation, and this refuses one here, so the rule
+/// holds at every place a statement is signed rather than at one of them.
+public struct EnclaveHostStatementSigner: PairingTranscriptSigner, SessionStatementSigner {
+  /// Raised when the identity handed in is not the host identity.
+  public enum Failure: Error, Equatable, Sendable {
+    case wrongIdentityRole(BridgeIdentityRole)
+  }
+
+  private let identity: BridgeIdentity
+
+  /// Creates the signer, refusing any identity that is not `.host`.
+  public init(identity: BridgeIdentity) throws {
+    guard identity.role == .host else {
+      throw Failure.wrongIdentityRole(identity.role)
+    }
+    self.identity = identity
+  }
+
+  /// The host public key the device verifies against. The pairing coordinator
+  /// needs it alongside the signer, and reading it from the same identity is
+  /// what stops a coordinator being built with a key that does not match the
+  /// signature it will produce.
+  public var hostPublicKeyX963: Data { identity.publicKeyX963 }
+
+  public func signPairingTranscript(_ canonicalBytes: Data) throws -> Data {
+    try identity.signStatement(canonicalBytes)
+  }
+
+  public func signSessionStatement(_ canonicalBytes: Data) throws -> Data {
+    try identity.signStatement(canonicalBytes)
+  }
+}
+
+// MARK: - Pairing proposal → stored grant
+
+/// Turns a completed pairing into the Mac's authoritative grant.
+///
+/// Pairing itself stores nothing — `PairedDeviceProposal` is documented as
+/// "the only successful pairing output: a proposal the Mac assembly turns into
+/// a stored grant". This is that assembly step, and without it a successful
+/// pairing produced a device the Mac had never heard of.
+///
+/// **The mapping is closed and cannot widen.** `PairedDeviceGrantIntent` has
+/// exactly one constructible value, so pairing can only ever propose `observe`
+/// with an empty project allowlist (plan §2 invariant 4). The capability
+/// translation is a total `switch`, so adding an intent case fails to compile
+/// here rather than silently falling through to something permissive, and the
+/// action-profile ceiling is pinned to `.observe` rather than derived — a
+/// freshly paired device can see nothing until the Mac user grants a project.
+public struct PairingGrantRecorder: Sendable {
+  private let authority: DeviceGrantAuthority
+
+  public init(authority: DeviceGrantAuthority) {
+    self.authority = authority
+  }
+
+  /// Records the proposal as a grant and returns the stored record.
+  ///
+  /// A duplicate device is the authority's decision, not this adapter's: it
+  /// throws, and re-pairing an already-known device must go through explicit
+  /// administration rather than silently overwriting a grant revision.
+  @discardableResult
+  public func record(_ proposal: PairedDeviceProposal) async throws -> AuthoritativeDeviceGrant {
+    try await authority.addGrant(
+      deviceID: proposal.deviceID,
+      devicePublicKey: proposal.devicePublicKeyX963,
+      capabilities: Self.capabilities(proposal.initialGrant.capabilities),
+      permittedProjectIDs: proposal.initialGrant.projectAllowlist,
+      actionProfileCeiling: .observe
+    )
+  }
+
+  /// Maps the crypto-local intent vocabulary onto the authoritative one.
+  ///
+  /// `CompanionCrypto` must not depend on `MacBridgeCore`, so pairing states
+  /// its intent in its own closed enum and the translation lives here.
+  static func capabilities(
+    _ intents: Set<PairedDeviceCapabilityIntent>
+  ) -> Set<DeviceCapability> {
+    Set(
+      intents.map { intent in
+        switch intent {
+        case .observe: DeviceCapability.view
+        }
+      })
+  }
+}
+
 // MARK: - Grant authority → session authority
 
 /// Answers the session coordinator's authority reads from the Mac-stored

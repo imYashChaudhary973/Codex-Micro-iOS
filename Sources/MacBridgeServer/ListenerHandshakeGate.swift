@@ -262,10 +262,44 @@ public struct DenyingListenerHandshakeHandler: ListenerHandshakeHandling {
 /// Pairing never authenticates a connection: a paired device reconnects and
 /// authenticates through the session coordinator, exactly as the plan's
 /// dependency chain requires.
+/// Where the two pairing facts the transport learns must go.
+///
+/// The handler cannot import `MacBridgeCore`, so it cannot store a grant, and
+/// it has no view, so it cannot show a phrase. Both facts would otherwise be
+/// discarded at exactly the point they become available — which is what
+/// happened before Step 2.14: the phrase was computed and dropped, and a
+/// completed proposal was dropped, so dual confirmation had no UI and a
+/// successful pairing produced no grant.
+public protocol ListenerPairingObserving: Sendable {
+  /// The device claimed the session. `phrase` is what the Mac user compares
+  /// against the phone; both sides derive it from the same transcript.
+  func pairingClaimed(
+    pairingSessionID: UUID,
+    phrase: SecureShortAuthenticationString
+  ) async
+
+  /// Both sides confirmed. The proposal must become a stored grant.
+  func pairingCompleted(_ proposal: PairedDeviceProposal) async
+}
+
+/// Discards both facts. The default, so a listener built without a pairing UI
+/// behaves exactly as it did before this seam existed.
+public struct DiscardingListenerPairingObserver: ListenerPairingObserving {
+  public init() {}
+
+  public func pairingClaimed(
+    pairingSessionID: UUID,
+    phrase: SecureShortAuthenticationString
+  ) async {}
+
+  public func pairingCompleted(_ proposal: PairedDeviceProposal) async {}
+}
+
 public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
   private let pairing: PairingCoordinator?
   private let session: SessionCoordinator
   private let frames: ListenerSessionFrameRegistry
+  private let observer: any ListenerPairingObserving
 
   /// Creates the handler.
   ///
@@ -277,14 +311,19 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
   ///     until the connection that authenticated claims them. Ownership
   ///     transfers exactly once, because their counters must never be
   ///     advanced from two places.
+  ///   - observer: Where the verification phrase and the completed proposal
+  ///     go. Defaults to discarding both, which is the pre-Step-2.14
+  ///     behaviour and is correct only for a listener with no pairing UI.
   public init(
     pairing: PairingCoordinator?,
     session: SessionCoordinator,
-    frames: ListenerSessionFrameRegistry = ListenerSessionFrameRegistry()
+    frames: ListenerSessionFrameRegistry = ListenerSessionFrameRegistry(),
+    observer: any ListenerPairingObserving = DiscardingListenerPairingObserver()
   ) {
     self.pairing = pairing
     self.session = session
     self.frames = frames
+    self.observer = observer
   }
 
   /// The registry a listener wires to its observation handler.
@@ -322,15 +361,29 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
     else {
       return .close(.pairingFailed)
     }
+    // The phrase is the whole point of this step and was previously dropped
+    // on the floor: without surfacing it, the Mac has nothing to show the
+    // user and dual confirmation cannot happen at all.
+    await observer.pairingClaimed(
+      pairingSessionID: request.pairingSessionID,
+      phrase: acceptance.verificationPhrase
+    )
     return .reply(reply)
   }
 
   private func handlePairingConfirmation(_ payload: Data) async -> ListenerHandshakeOutcome {
     guard let pairing,
       let confirmation = try? JSONDecoder().decode(SecurePairingConfirmation.self, from: payload),
-      (try? await pairing.submitDeviceConfirmation(confirmation)) != nil
+      let progress = try? await pairing.submitDeviceConfirmation(confirmation)
     else {
       return .close(.pairingFailed)
+    }
+    // A completed proposal is the only successful pairing output, and pairing
+    // itself stores nothing. Handing it on is what turns a completed pairing
+    // into a grant the Mac actually holds; without this the device would
+    // reconnect and be refused as unknown.
+    if case .completed(let proposal) = progress {
+      await observer.pairingCompleted(proposal)
     }
     // Pairing completion still needs the Mac user's local confirmation and
     // never authenticates this connection; the device reconnects to
