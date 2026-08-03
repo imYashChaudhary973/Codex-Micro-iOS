@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  iOS local-network privacy (ADR §12). Browsing for the bridge and
+	  connecting to it both require a usage description and an exact
+	  NSBonjourServices allowlist. Without them iOS refuses the browse
+	  outright, and the pairing acceptance case would fail for a packaging
+	  reason rather than a protocol one.
+
+	  AcceptancePreconditions.bonjourServiceMatchesBundle asserts this file
+	  against the service literal the host browses for, so a divergence is a
+	  blocked precondition rather than a mysterious empty browse.
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Codex Micro finds your Mac on this network to pair with it and observe your Codex sessions. Nothing is sent outside your network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_codexmicro._tcp</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+</dict>
+</plist>
