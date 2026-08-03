@@ -32,6 +32,10 @@ public enum BridgeStartupReason {
       case .profileTableEmpty: return "policy.empty"
       case .latticeFloorMoved: return "policy.floorMoved"
       }
+    case let failure as BridgeAuthorityProvisioning.Failure:
+      switch failure {
+      case .authorityLost: return "authority.lost"
+      }
     case let failure as BridgeCodexSupportProbe.Failure:
       switch failure {
       case .unsupported: return "codex.unsupported"

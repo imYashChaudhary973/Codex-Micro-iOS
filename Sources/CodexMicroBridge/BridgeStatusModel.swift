@@ -163,7 +163,28 @@ final class BridgeStatusModel {
     }
   }
 
+  /// Reports the LAN outcome on the same diagnostic channel as startup.
+  ///
+  /// Enabling LAN is the step most likely to fail for an environmental reason
+  /// — a refused local-network permission, no eligible interface, a Bonjour
+  /// publication the system declines — and all of those look identical in the
+  /// menu unless the closed reason is written somewhere readable.
+  private func reportLAN(_ state: BridgeLANState, isAdvertising: Bool) {
+    let code: String
+    switch state {
+    case .disabled: code = "lan.disabled"
+    case .enabling: code = "lan.enabling"
+    case .enabled: code = "lan.enabled.advertising=\(isAdvertising)"
+    case .disabling: code = "lan.disabling"
+    case .failed(let reason): code = "lan.failed.\(reason.rawValue)"
+    }
+    OSLogSink().write(
+      RedactedLogEntry(timestamp: Date(), level: .info, code: code, counts: [:]))
+    FileHandle.standardError.write(Data("codex-micro: \(code)\n".utf8))
+  }
+
   private func applyLANState(_ state: BridgeLANState, isAdvertising: Bool) {
+    reportLAN(state, isAdvertising: isAdvertising)
     metrics = BridgeConnectionMetrics(
       lanState: state,
       isAdvertising: isAdvertising,

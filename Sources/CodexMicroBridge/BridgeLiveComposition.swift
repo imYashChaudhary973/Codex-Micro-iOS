@@ -16,7 +16,7 @@ import MacBridgeServer
 /// one that names production storage, so it is also the only one that cannot
 /// run in a unit test, and keeping that boundary sharp is what lets everything
 /// else be tested.
-public struct BridgeLiveComposition {
+public struct BridgeLiveComposition: Sendable {
   /// The LAN control the menu toggles.
   public let lanController: BridgeLANController
   /// The pairing session lifecycle the pairing window drives.
@@ -25,6 +25,11 @@ public struct BridgeLiveComposition {
   public let pairingModel: BridgePairingModel
   /// Kept so the caller can read authority state for diagnostics.
   public let authority: DeviceGrantAuthority
+  /// The assembly, so an acceptance run can probe each startup prerequisite
+  /// individually. `BridgeLANFailure.startupDenied` is the right vocabulary
+  /// for a menu but useless for diagnosis: it collapses five independent
+  /// refusals — interface, Codex, policy, authority, identity — into one word.
+  public let assembly: BridgeNetworkAssembly
 
   /// Builds everything, or throws so the menu can show the bridge as
   /// unavailable rather than offering a control that cannot work.
@@ -33,6 +38,20 @@ public struct BridgeLiveComposition {
   /// store refuses to replace an identity it cannot find but was told to
   /// expect, so a wiped Keychain surfaces as a failure here instead of as a
   /// silently re-keyed bridge every paired phone would then reject.
+  private init(
+    assemblyForDiagnostics: BridgeNetworkAssembly,
+    lanController: BridgeLANController,
+    pairing: BridgePairingService,
+    pairingModel: BridgePairingModel,
+    authority: DeviceGrantAuthority
+  ) {
+    self.assembly = assemblyForDiagnostics
+    self.lanController = lanController
+    self.pairing = pairing
+    self.pairingModel = pairingModel
+    self.authority = authority
+  }
+
   @MainActor
   public static func make(codexProbe: BridgeCodexSupportProbe) throws -> BridgeLiveComposition {
     // Resetting an identity is gated on "no grants exist". The live gate is
@@ -44,7 +63,13 @@ public struct BridgeLiveComposition {
     let hostIdentity = try makeIdentityStore().loadOrCreate(role: .host).identity
     let hostSigner = try EnclaveHostStatementSigner(identity: hostIdentity)
 
-    let authority = DeviceGrantAuthority(storage: DataProtectionKeychainGrantStore())
+    // The store refuses to create its own item, so a first install must
+    // provision one before the authority is constructed. Without this a fresh
+    // bridge can never start: the grant-authority probe refuses, LAN stays
+    // off, and pairing — the only thing that creates a grant — is unreachable.
+    let grantStore = DataProtectionKeychainGrantStore()
+    try BridgeAuthorityProvisioning.ensureProvisioned(store: grantStore)
+    let authority = DeviceGrantAuthority(storage: grantStore)
     let pairingCoordinator = try PairingCoordinator(
       hostID: BridgeHostIdentifier.stable(),
       hostPublicKeyX963: hostSigner.hostPublicKeyX963,
@@ -96,6 +121,7 @@ public struct BridgeLiveComposition {
     )
 
     return BridgeLiveComposition(
+      assemblyForDiagnostics: assembly,
       lanController: assembly.makeLANController(),
       pairing: BridgePairingService(
         coordinator: pairingCoordinator, model: pairingModel),
