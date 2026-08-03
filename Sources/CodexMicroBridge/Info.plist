@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  macOS 15+ local-network privacy (ADR §12). Bonjour publication and LAN
+	  listening both require a signed app carrying a usage description and an
+	  exact NSBonjourServices allowlist; the signed transport spike proved
+	  that. Without these keys the listener binds but publication fails, which
+	  the LAN control surfaces as advertisementFailed and rolls back.
+
+	  This file is the source of truth for those keys. Bundling it into a
+	  signed .app is a packaging step that SwiftPM does not perform, so an
+	  unbundled `swift run` build still cannot advertise.
+	-->
+	<key>CFBundleIdentifier</key>
+	<string>com.codexmicro.bridge</string>
+	<key>CFBundleName</key>
+	<string>Codex Micro Bridge</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- Menu-bar only; no Dock icon and no main window. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Codex Micro Bridge listens on your local network so your iPhone can observe and control Codex sessions on this Mac. Nothing is sent outside your network.</string>
+	<!--
+	  The exact service the bridge publishes and browses. It matches
+	  ListenerBonjourRecord.serviceType; any other service is neither
+	  advertised nor discoverable.
+	-->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_codexmicro._tcp</string>
+	</array>
+</dict>
+</plist>
