@@ -100,5 +100,6 @@ struct AcceptanceView: View {
       next[gate.rawValue] = AcceptancePreconditions.readiness(for: gate)
     }
     readiness = next
+    AcceptancePreconditions.emit(next)
   }
 }

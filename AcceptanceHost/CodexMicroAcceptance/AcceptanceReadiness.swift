@@ -55,6 +55,26 @@ public enum AcceptancePreconditions {
     }
   }
 
+  /// Writes the results to stdout so a device run is capturable evidence
+  /// rather than a screenshot.
+  ///
+  /// `devicectl device process launch --console` picks this up, which is what
+  /// makes an on-device result quotable in a status document. A photograph of
+  /// a phone is not evidence anyone can diff.
+  public static func emit(_ results: [String: AcceptanceReadiness]) {
+    print("codex-micro acceptance readiness")
+    for gate in AcceptanceGate.allCases {
+      let state = results[gate.rawValue] ?? .physicalOnly
+      let rendered: String
+      switch state {
+      case .satisfied(let detail): rendered = "SATISFIED   \(detail)"
+      case .physicalOnly: rendered = "PHYSICAL    no offline precondition"
+      case .unsatisfied(let reason): rendered = "BLOCKED     \(reason)"
+      }
+      print("  \(gate.rawValue.padding(toLength: 30, withPad: " ", startingAt: 0)) \(rendered)")
+    }
+  }
+
   // MARK: - Individual preconditions
 
   /// Creates a **non-persistent** Secure Enclave key and discards it.

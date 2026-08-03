@@ -606,7 +606,7 @@ This is the specific thing a composition root is for. No unit test could have ca
 
 ### Step 2.14 verification so far
 
-**13 new deterministic tests** (root suite total **964**, up from 951). Three of them assert the wiring directly: real handlers rather than denying ones, one shared frame registry, and a distinct registry per listener.
+**18 new deterministic tests** (root suite total **969**, up from 951). Three assert the listener wiring directly: real handlers rather than denying ones, one shared frame registry, and a distinct registry per listener. Five more assert the app-server request bodies, which is the gap that let the `turn/steer` defect through.
 
 ### The signed acceptance host
 
@@ -628,23 +628,69 @@ It **drives the production types rather than a hand-rolled copy**: the request b
 
 Isolation: an ephemeral thread rooted in a fresh temporary directory that is also its only writable root, network access off, approval policy `untrusted`, and the directory removed afterwards. The turn is interrupted rather than run to completion.
 
-**The probe has been built but not run.** It requires a live Codex turn, which consumes allowance; the run was not performed by this session. `turn/steer` and the `workspaceWrite` form of `turn/start` therefore remain **unverified**, exactly as they were at the end of Step 2.11. The installed Codex is 0.146.0, which is the single version `CodexCompatibilityPolicy.phase1` supports.
+**It was run against live Codex 0.146.0, and it found a defect.**
+
+`turn/steer` was refused outright:
+
+```text
+turn/steer: REFUSED — CodexRPCError(code: -32600,
+  message: "Invalid request: missing field `expectedTurnId`")
+```
+
+Step 2.11 wrote the call with a `turnId` field from the documented architecture and recorded that it was proven nowhere. The field is `expectedTurnId`. **Every steer the bridge issued would have failed** — not degraded, hard-rejected.
+
+The name is not a spelling detail. `expectedTurnId` makes the call a compare-and-swap: Codex refuses the steer unless that turn is still the thread's current one. Steering a turn that already finished, or one replaced by a newer turn, is refused by Codex itself rather than silently applying to whatever is running now. The status doc previously listed "binding the turn-policy registry to observed `turn/completed` events, so steering a finished turn is a clean denial rather than an `outcomeUnknown`" as deferred work; Codex supplies that guarantee directly.
+
+After the fix, the probe reports both calls accepted:
+
+```text
+Codex Micro Phase 2 steer probe
+  isolation: ephemeral thread, fresh temp root, network-disabled
+  sandbox requested: workspaceWrite
+  writable roots: 1
+  turn/start (workspaceWrite form): accepted, turn 019fc8f9-e847-7c63-a617-0d615d156ba5
+  turn/steer: accepted
+```
+
+**Both calls are now proven against a live Codex**, closing the last item outstanding from Steps 2.10 and 2.11.
+
+**Why no test caught it.** Every steer test in the repository drives the `CodexTurnSteering` seam with a double, which proves the gateway's authorization logic and nothing about the request body. This is the same shape as the listener wiring defect above: the seam was tested, the thing on the other side of it was not. `RuntimeWireShapeTests` now asserts the field names of `turn/steer`, both forms of `turn/start`, and `turn/interrupt` against a fake transport, so this class of defect fails in CI rather than on a phone.
+
+### On-device readiness
+
+The acceptance host was installed on the iPhone 13 (`00008110-00090C660EC0A01E`) and run. All seven checkable preconditions are satisfied on real hardware:
+
+```text
+codex-micro acceptance readiness
+  enclaveIdentityAndReinstall    SATISFIED   Secure Enclave produced a P-256 key; nothing persisted
+  pinnedSelfSignedWSS            SATISFIED   pairing payload round-trips; pin is a 32-byte SPKI digest
+  pairingAndBonjour              SATISFIED   _codexmicro._tcp allowed; phrase list codex-micro/sas-words/v1 complete and unique
+  ipChange                       PHYSICAL    no offline precondition
+  foregroundBackgroundReauth     PHYSICAL    no offline precondition
+  macRestart                     PHYSICAL    no offline precondition
+  keychainLockAndReboot          PHYSICAL    no offline precondition
+  tlsRotation                    SATISFIED   rotation statement encodes to 128 canonical bytes
+  filteredObserveAndReplay       SATISFIED   observation decoder rejects unknown fields
+  immediateRevocation            SATISFIED   deviceRevoked round-trips as its own reason
+  idempotentInterrupt            SATISFIED   command decoder rejects unknown fields
+```
+
+The Secure Enclave line is the one that could not have come from a simulator or an unsigned build. **This is readiness, not acceptance** — zero of the eleven physical cases have been run.
 
 ### What Step 2.14 still owes
 
-- **The app has not been installed on a device.** It is signed and provisioned; installation was not performed by this session.
-- **The steer probe has not been run.** It builds; nothing has executed it against a live Codex.
+- **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
 - The pairing QR and phrase confirmation still have no UI.
-- `turn/steer` and the `workspaceWrite` form of `turn/start` remain unverified against a live Codex.
+- ~~`turn/steer` and the `workspaceWrite` form of `turn/start` remain unverified~~ — **both proven against live Codex 0.146.0**; `turn/steer` needed a field-name fix to work at all.
 
 ## Current verification evidence
 
 ```text
-Root swift test: 964 passed, 0 failed
-  (MacBridgeServerTests 265, MacBridgeCoreTests 364, CompanionCryptoTests 237,
+Root swift test: 969 passed, 0 failed
+  (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
    CodexMicroBridgeTests 80, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
@@ -661,11 +707,16 @@ Acceptance host, development-signed (-allowProvisioningUpdates): BUILD SUCCEEDED
   Profile: automatically provisioned iOS Team Provisioning Profile
   Built bundle: arm64, MinimumOSVersion 17.0, com.codexmicro.acceptance,
     NSBonjourServices == [_codexmicro._tcp], usage description present
-App installed on a physical device: no
+App installed on a physical device: yes — iPhone 13, 00008110-00090C660EC0A01E,
+  launched and its readiness output captured from the device console
 Physical acceptance cases run: none — 0 of 11
+On-device readiness: 7 of 7 checkable preconditions satisfied, including Secure
+  Enclave P-256 key creation, which cannot pass in a simulator or unsigned build
 Installed Codex: codex-cli 0.146.0 — the single version phase1 policy supports
-Live steer probe (codex-micro-spike steer-probe): builds; NOT run. turn/steer and
-  the workspaceWrite form of turn/start remain unverified against a live Codex
+Live steer probe (codex-micro-spike steer-probe): RUN. It found turn/steer sending
+  the wrong field name; every steer would have been hard-rejected. After the fix
+  both turn/steer and the workspaceWrite form of turn/start are accepted by live
+  Codex 0.146.0 — the last item outstanding from Steps 2.10 and 2.11
 Spike package (merged main, separate pins): 31 tests passed at Step 2.1; not re-run since
 Phase 2 production listener added: yes — off by default. A production enabled
   configuration now exists and requires a ListenerEnablement that only an explicit
@@ -693,9 +744,10 @@ Network command path added: yes — the sole gateway, with interruptTurn, markTh
   are denied
 Live Codex turn or approval executed: no — every command-path result is against injected
   doubles; no live turn/interrupt, turn/start, or turn/steer was issued
-App-server methods proven against a real Codex: turn/start and turn/interrupt (merged
-  Phase 0 spike). turn/steer is NOT proven anywhere and the workspaceWrite sandbox form
-  of turn/start is NOT proven; both are written to the documented architecture only
+App-server methods proven against a real Codex: turn/start (both readOnly and
+  workspaceWrite forms), turn/interrupt, and turn/steer. The first two come from the
+  merged Phase 0 spike; the workspaceWrite form and turn/steer were proven by the
+  Step 2.14 steer probe, which found turn/steer broken and fixed it
 Phone-supplied sandbox, path, approval, or network setting: none — the command schema
   has no field for any of them; the Mac resolves every turn setting
 Codex request added by the observe path: no — the broker reads the assembly snapshot only
