@@ -114,3 +114,13 @@ Both were deliberate Phase 2 decisions. Both are reversed here because the devic
 Steps 3.9a, 3.9b, and 3.10 additionally require the Phase 2 security review pass — trust boundaries, state transitions, replay and idempotency, storage failure, decoder strictness, logging, and resource bounds — because they extend the authorization model rather than consume it.
 
 Phase 3 is accepted when 3.13 passes on a frozen `main` SHA. No parity claim before then.
+
+## 7. Step 3.13 status
+
+The matrix and its tooling are merged; **no physical case has been run.**
+
+Eleven cases, each naming an observation a person makes rather than an assertion a machine makes. That split is deliberate: the protocol underneath is covered by over a thousand deterministic tests and a physical Phase 2 acceptance, and a case that could be automated belongs in the unit suite where most of them already are. What no test can answer is whether the *device* behaves like the device — whether a key tells the truth while you are looking at it, whether a control that cannot act says so before you press it, and whether the thing stays usable when the network does not.
+
+The acceptance host is signed and installed on the iPhone 13. The run is blocked on the device being locked: `SBMainWorkspace` refuses to launch an app on a locked phone, which is correct behaviour rather than an obstacle — the device identity is `WhenUnlockedThisDeviceOnly`, so a locked phone could not sign a transcript regardless.
+
+Phase 3 therefore stands as **built and deterministically verified, not accepted.** The distinction is the same one Phase 2 held to, and it is the whole reason the acceptance step exists as its own gate.
