@@ -170,9 +170,15 @@ public struct DeviceAuthorizedView: Equatable, Sendable {
   /// it is not — in which case **no sequence is consumed**. `projectID` is
   /// the attribution result; `nil` means unattributable, which is never
   /// visible.
+  ///
+  /// `thread` is the change's resulting state, already filtered. Carrying it
+  /// is what lets a device keep six status keys correct without waiting for a
+  /// snapshot; omitting it leaves the device knowing something changed and
+  /// not what to.
   public mutating func admit(
     threadID: String,
-    projectID: String?
+    projectID: String?,
+    thread: ObservedThreadState? = nil
   ) throws -> SecureObservationEvent? {
     guard scope.permits(projectID: projectID), let projectID else { return nil }
     guard latestSequence < UInt64.max - 1 else {
@@ -183,7 +189,8 @@ public struct DeviceAuthorizedView: Equatable, Sendable {
         sequence: latestSequence + 1,
         kind: .threadUpdated,
         threadID: threadID,
-        projectID: projectID
+        projectID: projectID,
+        thread: thread
       )
     else {
       throw ObservationProjectionError.projectionOversized

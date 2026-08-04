@@ -107,6 +107,13 @@ public struct BridgeLiveComposition: Sendable {
         runtime: NeverReadyRuntime(),
         responder: UnavailableCodexResponder(),
         turnStarter: UnavailableTurnStarter(),
+        // New chat and approvals stay closed here. Both are opt-in by design
+        // and neither default is a mistake: `startThread` honours the Step
+        // 2.12 deferral's terms, and approvals stay shut until the Mac has a
+        // reviewed way to surface them. Supplying either is a deliberate act,
+        // which is exactly what those gates exist to require.
+        threadStarter: DeniedThreadStarter(),
+        approvals: nil,
         turnSteerer: UnavailableTurnSteerer(),
         readCursors: try DeviceReadCursorStore(
           storage: FileBackedReadCursorStorage(),

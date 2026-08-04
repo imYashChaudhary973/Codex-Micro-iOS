@@ -184,12 +184,28 @@ public struct SecureObservationEvent: Codable, Equatable, Sendable {
   public let kind: SecureObservationEventKind
   public let threadID: String
   public let projectID: String
+  /// The thread's state after the change.
+  ///
+  /// **Carried, not merely announced.** An event that says only "thread X
+  /// changed" is enough for a client that will go and look, and useless for
+  /// six always-on status keys: the previous state is known to be wrong the
+  /// moment the event arrives, so a device holding it would be lying, and a
+  /// device dropping it would go blank until a snapshot happened along. Both
+  /// break the rule that a key shows what it was told.
+  ///
+  /// The Mac already has this value when it builds the event — it comes from
+  /// the same filtered projection the snapshot uses — so including it costs a
+  /// few hundred bytes and removes an entire class of wrong display.
+  ///
+  /// Optional so an event about a thread that has gone away can say so.
+  public let thread: ObservedThreadState?
 
   public init(
     sequence: UInt64,
     kind: SecureObservationEventKind,
     threadID: String,
-    projectID: String
+    projectID: String,
+    thread: ObservedThreadState? = nil
   ) throws {
     guard sequence >= 1 else {
       throw SecureWireValidationError.invalidField(name: "sequence")
@@ -202,6 +218,7 @@ public struct SecureObservationEvent: Codable, Equatable, Sendable {
     self.kind = kind
     self.threadID = threadID
     self.projectID = projectID
+    self.thread = thread
   }
 
   public init(from decoder: Decoder) throws {
@@ -210,7 +227,8 @@ public struct SecureObservationEvent: Codable, Equatable, Sendable {
       sequence: container.decode(UInt64.self, forKey: .sequence),
       kind: container.decode(SecureObservationEventKind.self, forKey: .kind),
       threadID: container.decode(String.self, forKey: .threadID),
-      projectID: container.decode(String.self, forKey: .projectID)
+      projectID: container.decode(String.self, forKey: .projectID),
+      thread: try container.decodeIfPresent(ObservedThreadState.self, forKey: .thread)
     )
   }
 
@@ -219,6 +237,7 @@ public struct SecureObservationEvent: Codable, Equatable, Sendable {
     case kind
     case threadID
     case projectID
+    case thread
   }
 }
 
