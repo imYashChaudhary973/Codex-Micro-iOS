@@ -14,6 +14,10 @@ import SwiftUI
 /// violate the one invariant the surface exists to keep.
 struct DeviceScreen: View {
   @State private var surface: DeviceSurfaceState = .disconnected
+  @State private var bindings: AgentKeyBindings = .empty
+  @State private var threads: [ObservedThreadState] = []
+  @State private var lastUpdate: Date?
+  @State private var isConnected = false
   @State private var selectedSlot: Int?
 
   var body: some View {
@@ -21,17 +25,33 @@ struct DeviceScreen: View {
       selectedSlot = surface.selectedSlot == slot ? nil : slot
       reproject()
     }
+    .onAppear {
+      bindings = AgentKeyBindingStore.load()
+      reproject()
+    }
   }
 
-  /// Re-derives the surface. Once the session client exists this runs on every
-  /// observation batch; for now it only reflects selection.
+  /// Applies a new authorized view: fill empty keys, keep every established
+  /// one, persist, and re-derive.
+  func apply(threads incoming: [ObservedThreadState], at instant: Date) {
+    threads = incoming
+    lastUpdate = instant
+    let filled = bindings.filling(from: incoming)
+    if filled != bindings {
+      bindings = filled
+      AgentKeyBindingStore.save(filled)
+    }
+    reproject()
+  }
+
+  /// Re-derives the surface from whatever is currently known.
   private func reproject() {
     surface = DeviceSurfaceProjection().project(
-      bindings: [],
-      threads: [],
-      lastUpdate: nil,
+      bindings: bindings.slots,
+      threads: threads,
+      lastUpdate: lastUpdate,
       now: Date(),
-      isConnected: false,
+      isConnected: isConnected,
       selectedSlot: selectedSlot
     )
   }
