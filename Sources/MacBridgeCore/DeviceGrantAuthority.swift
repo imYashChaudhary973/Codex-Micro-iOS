@@ -264,6 +264,50 @@ public actor DeviceGrantAuthority {
     }
   }
 
+  /// Widens the device's project scope.
+  ///
+  /// The counterpart to ``reduceScope(deviceID:permittedProjectIDs:)``, and
+  /// until now the missing half: pairing grants an empty allowlist by design
+  /// (plan §2 invariant 4), and nothing could add to it. A paired device could
+  /// therefore never be shown anything, which made the whole observation path
+  /// unreachable in practice however well it worked in tests.
+  ///
+  /// **Widening is as security-relevant as reducing and is treated the same
+  /// way.** The grant revision bumps, and the authorized-view epoch bumps too:
+  /// a device whose scope grew must be forced onto a fresh filtered snapshot
+  /// rather than continuing a replay that was cut to the old scope, or its
+  /// sequence namespace would have gaps where the newly visible project's
+  /// activity should be.
+  ///
+  /// Only a strict superset is accepted, so this cannot quietly remove a
+  /// project while appearing to add one — that is what `reduceScope` is for,
+  /// and conflating them would let one call do both without saying so.
+  @discardableResult
+  public func widenScope(
+    deviceID: UUID,
+    permittedProjectIDs: Set<String>
+  ) throws -> AuthoritativeDeviceGrant {
+    let now = clock()
+    return try mutateActiveRecord(deviceID: deviceID, now: now) { record in
+      guard permittedProjectIDs.isStrictSuperset(of: record.permittedProjectIDs) else {
+        throw DeviceGrantAuthorityError.invalidGrant
+      }
+      return try AuthoritativeDeviceGrant(
+        deviceID: record.deviceID,
+        devicePublicKey: record.devicePublicKey,
+        createdAtEpochSeconds: record.createdAtEpochSeconds,
+        lastSeenAtEpochSeconds: record.lastSeenAtEpochSeconds,
+        capabilities: record.capabilities,
+        permittedProjectIDs: permittedProjectIDs,
+        actionProfileCeiling: record.actionProfileCeiling,
+        grantRevision: try Self.bumped(record.grantRevision),
+        authorizedViewEpoch: try Self.bumped(record.authorizedViewEpoch),
+        expiresAtEpochSeconds: record.expiresAtEpochSeconds,
+        tombstone: nil
+      )
+    }
+  }
+
   /// Replaces the device's capabilities and mobile-action-profile ceiling.
   ///
   /// Bumps the grant revision. The authorized-view epoch also advances

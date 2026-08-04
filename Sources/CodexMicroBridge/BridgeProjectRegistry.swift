@@ -130,11 +130,29 @@ public actor BridgeProjectRegistry {
 /// cannot name a path, and the bridge never widens one beyond the project the
 /// grant already allows. An unregistered project has no roots, so a turn for
 /// it resolves down to read-only (Step 2.10's rule).
-public struct BridgeWorkspaceRootResolver: WorkspaceRootResolving {
-  private let roots: [String: [String]]
+public final class BridgeWorkspaceRootResolver: WorkspaceRootResolving, @unchecked Sendable {
+  private let lock = NSLock()
+  private var roots: [String: [String]]
 
-  /// Snapshots the registry. Taken at listener start so a root cannot change
-  /// underneath a turn that already resolved its policy.
+  /// Replaces the snapshot.
+  ///
+  /// The original type snapshotted once at construction so a root could not
+  /// change underneath a turn. That property is kept and the constraint that
+  /// broke it is not: the gateway resolves writable roots exactly once per
+  /// turn, when it builds the policy, so a turn still runs on the roots it
+  /// started with. What changes is that a project registered *after* the
+  /// composition was built is now visible at all — before, the resolver was
+  /// constructed with an empty registry and every project resolved to no
+  /// roots, so every workspace-write turn silently became read-only.
+  public func update(projects: [BridgeProject]) {
+    let next = Dictionary(
+      projects.map { ($0.projectID, [$0.rootPath]) }, uniquingKeysWith: { first, _ in first })
+    lock.lock()
+    defer { lock.unlock() }
+    roots = next
+  }
+
+  /// Snapshots the registry.
   public init(projects: [BridgeProject]) {
     roots = Dictionary(
       projects.map { ($0.projectID, [$0.rootPath]) },
@@ -143,7 +161,9 @@ public struct BridgeWorkspaceRootResolver: WorkspaceRootResolving {
   }
 
   public func writableRoots(forProjectID projectID: String) -> [String] {
-    roots[projectID] ?? []
+    lock.lock()
+    defer { lock.unlock() }
+    return roots[projectID] ?? []
   }
 }
 

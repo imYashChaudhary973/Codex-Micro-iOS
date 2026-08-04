@@ -39,6 +39,8 @@ public struct BridgeLiveComposition: Sendable {
   /// expect, so a wiped Keychain surfaces as a failure here instead of as a
   /// silently re-keyed bridge every paired phone would then reject.
   private init(
+    workspaceRootsForRefresh: BridgeWorkspaceRootResolver,
+    registryForGrants: BridgeProjectRegistry,
     pumpForRetention: BridgeObservationPump?,
     assemblyForDiagnostics: BridgeNetworkAssembly,
     lanController: BridgeLANController,
@@ -46,6 +48,8 @@ public struct BridgeLiveComposition: Sendable {
     pairingModel: BridgePairingModel,
     authority: DeviceGrantAuthority
   ) {
+    self.workspaceRoots = workspaceRootsForRefresh
+    self.registry = registryForGrants
     self.pump = pumpForRetention
     self.assembly = assemblyForDiagnostics
     self.lanController = lanController
@@ -56,6 +60,10 @@ public struct BridgeLiveComposition: Sendable {
 
   /// The pump feeding the broker, retained so it keeps running.
   public let pump: BridgeObservationPump?
+  /// The projects a device may be granted. Threads resolve to these.
+  public let registry: BridgeProjectRegistry
+  /// The gateway's view of writable roots, refreshed when projects change.
+  public let workspaceRoots: BridgeWorkspaceRootResolver
 
   @MainActor
   public static func make(
@@ -92,6 +100,8 @@ public struct BridgeLiveComposition: Sendable {
     )
 
     let attribution = ThreadProjectTable()
+    let registry = BridgeProjectRegistry()
+    let roots = BridgeWorkspaceRootResolver(projects: [])
     // The snapshot source is the live assembly when there is one. Without it
     // a device connects, subscribes, and is told about nothing — which is
     // precisely how the keys stayed dark: the surface was correct and the
@@ -134,6 +144,11 @@ public struct BridgeLiveComposition: Sendable {
         threadStarter: DeniedThreadStarter(),
         approvals: nil,
         turnSteerer: codex?.runtime ?? UnavailableTurnSteerer(),
+        // Without this the gateway resolves every project to no writable
+        // roots, so a workspace-write turn silently becomes read-only —
+        // present-and-degraded rather than refused, which is the shape the
+        // invariants exist to avoid.
+        workspaceRoots: roots,
         readCursors: try DeviceReadCursorStore(
           storage: FileBackedReadCursorStorage(),
           scopes: authority,
@@ -152,7 +167,7 @@ public struct BridgeLiveComposition: Sendable {
       BridgeObservationPump(
         broker: broker,
         attribution: BridgeThreadAttributionResolver(
-          registry: BridgeProjectRegistry(),
+          registry: registry,
           table: attribution,
           readThread: { threadID in
             // The assembly reads the thread from the running app-server; the
@@ -165,6 +180,8 @@ public struct BridgeLiveComposition: Sendable {
     }
 
     return BridgeLiveComposition(
+      workspaceRootsForRefresh: roots,
+      registryForGrants: registry,
       pumpForRetention: pump,
       assemblyForDiagnostics: assembly,
       lanController: assembly.makeLANController(),
