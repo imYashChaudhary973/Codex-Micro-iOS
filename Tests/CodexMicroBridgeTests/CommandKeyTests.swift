@@ -127,3 +127,50 @@ final class CommandKeyTests: XCTestCase {
     return DeviceSurfaceState(agentKeys: keys, selectedSlot: selected, isConnected: true)
   }
 }
+
+/// Command outcomes as the device reports them.
+///
+/// The device's job here is to be honest about one thing above all: a command
+/// whose result is genuinely unknown must not be reported as either done or
+/// failed. Saying "failed" invites a retry that executes twice; saying "done"
+/// hides a command that never ran.
+final class CommandOutcomeTests: XCTestCase {
+
+  /// A denial reason the phone cannot name would surface as a blank refusal —
+  /// the worst possible outcome for the one message whose entire job is to
+  /// explain why something did not happen.
+  func testEveryDenialReasonHasAMessage() {
+    for reason in SecureCommandDenialReason.allCases {
+      let message = CommandOutcome.denied(reason).message
+      XCTAssertFalse(message.isEmpty, reason.rawValue)
+      XCTAssertNotEqual(message, reason.rawValue, "\(reason.rawValue) leaked its raw code")
+    }
+  }
+
+  /// The Mac's own outcome vocabulary maps onto the device's without losing
+  /// the distinction that matters.
+  func testUnknownAndFailedBothReportAsUnknownRatherThanAsFailure() throws {
+    let unknown = try SecureCommandResult(
+      commandID: UUID(), outcome: .outcomeUnknown, denialReason: nil)
+    let failed = try SecureCommandResult(
+      commandID: UUID(), outcome: .failed, denialReason: nil)
+
+    XCTAssertEqual(CommandOutcome.from(unknown), .unknown)
+    // `failed` means the runtime refused after the command was claimed, so
+    // whether anything happened is still not knowable from here.
+    XCTAssertEqual(CommandOutcome.from(failed), .unknown)
+  }
+
+  func testACompletedResultReportsCompleted() throws {
+    let result = try SecureCommandResult(
+      commandID: UUID(), outcome: .completed, denialReason: nil)
+
+    XCTAssertEqual(CommandOutcome.from(result), .completed)
+  }
+
+  /// The unknown message must tell the user not to blindly retry, because a
+  /// retry of an unknown command is the one action that can double-execute.
+  func testTheUnknownMessageWarnsBeforeRetrying() {
+    XCTAssertTrue(CommandOutcome.unknown.message.lowercased().contains("retry"))
+  }
+}
