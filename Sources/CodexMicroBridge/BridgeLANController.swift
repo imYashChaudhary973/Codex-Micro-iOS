@@ -62,15 +62,31 @@ public protocol BridgeListenerControlling: Sendable {
 public actor BridgeLANController {
   private let makeListener: @Sendable () -> any BridgeListenerControlling
   private let bonjour: ListenerBonjourCoordinator
+  /// Builds a publisher for the listener that was just started.
+  ///
+  /// The record has to be applied to the `NWListener` the bind produced, so
+  /// the publisher cannot exist before the listener does. Passing a factory
+  /// keeps the ordering the controller already enforces — bind, then
+  /// advertise, roll back if publication fails — while letting the publisher
+  /// reach the thing it publishes on.
+  private let makePublisher:
+    @Sendable (any BridgeListenerControlling) -> (
+      any ListenerBonjourPublishing
+    )?
   private var listener: (any BridgeListenerControlling)?
   private var state: BridgeLANState = .disabled
 
   public init(
     makeListener: @escaping @Sendable () -> any BridgeListenerControlling,
-    bonjour: ListenerBonjourCoordinator = ListenerBonjourCoordinator()
+    bonjour: ListenerBonjourCoordinator = ListenerBonjourCoordinator(),
+    makePublisher:
+      @escaping @Sendable (any BridgeListenerControlling) -> (
+        any ListenerBonjourPublishing
+      )? = { _ in nil }
   ) {
     self.makeListener = makeListener
     self.bonjour = bonjour
+    self.makePublisher = makePublisher
   }
 
   /// The state the menu shows.
@@ -97,6 +113,9 @@ public actor BridgeLANController {
     }
     self.listener = listener
 
+    if let publisher = makePublisher(listener) {
+      await bonjour.use(publisher)
+    }
     do {
       try await bonjour.publishAfterReadiness(rollback: {
         // Roll the bind back before anyone can observe a failed publication

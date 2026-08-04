@@ -311,6 +311,12 @@ public actor DeviceObservationBroker {
   }
 
   /// Test and diagnostic read of a device's subscription watermarks.
+  /// How many devices currently hold a subscription.
+  ///
+  /// A count and nothing else: it says whether anyone is watching without
+  /// naming who, which is the same content-free shape the menu metrics use.
+  public func observingDeviceCount() -> Int { subscriptions.count }
+
   public func subscription(deviceID: UUID) -> ObservationSubscription? {
     subscriptions[deviceID]
   }

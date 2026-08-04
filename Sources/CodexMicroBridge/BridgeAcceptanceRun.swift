@@ -39,6 +39,59 @@ public enum BridgeAcceptanceRun {
     ProcessInfo.processInfo.environment[deviceWaitKey] == "1"
   }
 
+  /// Set to `1` to bring LAN up, grant every already-paired device a working
+  /// scope, and stay serving so a phone can connect and issue commands.
+  public static let serveKey = "CODEX_MICRO_ACCEPTANCE_SERVE"
+
+  public static var serves: Bool {
+    ProcessInfo.processInfo.environment[serveKey] == "1"
+  }
+
+  /// Stays up serving an already-paired device.
+  ///
+  /// The pairing run exits once a grant is stored, which is right for a test
+  /// and useless for exercising the pad: the phone reconnects to a Mac that is
+  /// no longer there. This keeps the listener up and reports what the device
+  /// does, so a key press on the phone can be watched arriving.
+  public static func serve(_ live: BridgeLiveComposition) async {
+    report("serve.start")
+    await preflight(live)
+
+    let endpoint: ListenerEndpoint
+    do {
+      endpoint = try await live.lanController.enable()
+    } catch {
+      report("serve.lanFailed", "\(error)")
+      return
+    }
+    let advertising = await live.lanController.isAdvertising()
+    report(
+      "serve.listening",
+      "host=\(endpoint.host) port=\(endpoint.port) advertising=\(advertising)")
+
+    // Every device the Mac already holds gets the working scope, so a phone
+    // paired in an earlier run can connect and act without re-pairing.
+    let snapshot = try? await live.authority.macAdministrationSnapshot()
+    for grant in snapshot?.grants ?? [] where grant.tombstone == nil {
+      await grantWorkingScope(live, deviceID: grant.deviceID)
+    }
+    report("serve.granted", "devices=\(snapshot?.grants.count ?? 0)")
+    report("serve.ready", "press keys on the phone; results appear on the Mac")
+
+    // Stay up. The listener and the gateway do the work; this only keeps the
+    // process alive and reports when the set of observing devices changes, so
+    // a phone connecting is visible without needing a screenshot.
+    var lastObserving = -1
+    while !Task.isCancelled {
+      let observing = await live.assembly.broker.observingDeviceCount()
+      if observing != lastObserving {
+        lastObserving = observing
+        report("serve.observing", "\(observing)")
+      }
+      try? await Task.sleep(for: .seconds(3))
+    }
+  }
+
   /// Brings the bridge up, publishes a pairing code, and waits for a real
   /// device to complete pairing.
   ///

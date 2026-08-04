@@ -139,6 +139,25 @@ public actor HardenedWSSListener {
     }
   }
 
+  /// Publishes the Bonjour record on the bound listener.
+  ///
+  /// Advertising is a property of the `NWListener` the bind produced, so only
+  /// this actor can do it — which is why nothing did: the only publisher that
+  /// existed was the disabled stub, and it reported success. A device could
+  /// therefore never discover a bridge that reported itself as advertising.
+  ///
+  /// Called after the bind and before the LAN control reports success, so a
+  /// record is never published for a listener that is not accepting.
+  public func advertise() throws {
+    guard let resources else { throw ListenerError.listenerUnavailable }
+    resources.listener.service = ListenerBonjourRecord.service()
+  }
+
+  /// Withdraws the record, leaving the listener bound.
+  public func withdraw() {
+    resources?.listener.service = nil
+  }
+
   /// Stops the listener and joins teardown. Duplicate stops are safe; a
   /// stop racing a start makes the start fail rather than leaking a
   /// listener.

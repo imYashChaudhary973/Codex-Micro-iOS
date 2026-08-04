@@ -58,6 +58,17 @@ public final class DeviceConnection: ObservableObject {
 
   public init() {}
 
+  /// Connection progress on standard error.
+  ///
+  /// The Mac reports its startup the same way, and for the same reason: a
+  /// phone that will not connect is undiagnosable from the screen, which says
+  /// only "not connected". Every code here is a closed vocabulary — no
+  /// address, no key, no identifier.
+  private func report(_ code: String, _ detail: String = "") {
+    let line = detail.isEmpty ? "device: \(code)" : "device: \(code) — \(detail)"
+    FileHandle.standardError.write(Data((line + "\n").utf8))
+  }
+
   // MARK: - Lifecycle
 
   /// Connects, authenticates, and subscribes.
@@ -65,9 +76,11 @@ public final class DeviceConnection: ObservableObject {
     guard readTask == nil else { return }
     let stored = try? PairedHostStore.load()
     guard let host = stored ?? nil else {
+      report("connect.notPaired")
       status = .notPaired
       return
     }
+    report("connect.paired", "hostID known")
     guard let key = try? DeviceIdentity.load() ?? DeviceIdentity.create(),
       let publicKey = try? DeviceIdentity.publicKeyX963(key),
       let identity = try? SessionDeviceIdentity(
@@ -75,18 +88,36 @@ public final class DeviceConnection: ObservableObject {
         publicKeyX963: publicKey,
         signer: EnclaveSessionSigner(key: key))
     else {
+      report("connect.identityUnavailable")
       status = .failed("identityUnavailable")
       return
     }
 
     status = .connecting
-    let session = SessionClient(host: host, identity: identity)
+    // Discover where the Mac is now. The stored origin records where it was,
+    // and the listener binds an ephemeral port, so that address is stale after
+    // any restart — which is why a paired phone connected exactly once. The
+    // pins make browsing safe: a wrong answer fails at TLS.
+    var target = host
+    let found = await BridgeDiscovery.find()
+    report("connect.discovery", found == nil ? "not found" : "found")
+    if let found {
+      target = PairedHost(
+        hostID: host.hostID,
+        hostPublicKeyX963: host.hostPublicKeyX963,
+        tlsSPKIFingerprint: host.tlsSPKIFingerprint,
+        endpointOrigin: "wss://\(found.host):\(found.port)"
+      )
+    }
+    let session = SessionClient(host: target, identity: identity)
     do {
       try await session.authenticate()
     } catch {
+      report("connect.authFailed", Self.describe(error))
       status = .failed(Self.describe(error))
       return
     }
+    report("connect.authenticated")
     self.session = session
     status = .connected
 
@@ -99,9 +130,11 @@ public final class DeviceConnection: ObservableObject {
       try await session.send(
         kind: .observationSubscribe, payload: try JSONEncoder().encode(subscribe))
     } catch {
+      report("connect.subscribeFailed")
       status = .failed("subscribeFailed")
       return
     }
+    report("connect.subscribed")
     readTask = Task { [weak self] in await self?.readLoop(session) }
   }
 

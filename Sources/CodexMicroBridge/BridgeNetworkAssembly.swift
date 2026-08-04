@@ -350,7 +350,14 @@ public struct BridgeNetworkAssembly: Sendable {
           interfacePolicy: interfacePolicy
         )
       },
-      bonjour: bonjour
+      bonjour: bonjour,
+      // The record goes on the NWListener the bind produced. Until this
+      // existed the only publisher was the disabled stub, which reported
+      // success while advertising nothing — so a phone could never discover a
+      // Mac that said it was advertising.
+      makePublisher: { listener in
+        (listener as? HardenedWSSListener).map(HardenedListenerBonjourPublisher.init)
+      }
     )
   }
 }
