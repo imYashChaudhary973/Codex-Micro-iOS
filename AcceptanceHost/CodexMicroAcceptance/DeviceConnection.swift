@@ -320,6 +320,7 @@ public final class DeviceConnection: ObservableObject {
     case .sessionClosed(let reason): return reason.rawValue
     case .malformedReply: return "malformedReply"
     case .notAuthenticated: return "notAuthenticated"
+    case .authenticationRejected(let detail): return detail
     }
   }
 }

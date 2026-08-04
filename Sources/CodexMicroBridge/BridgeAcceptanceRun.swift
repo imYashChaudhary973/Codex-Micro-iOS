@@ -184,6 +184,13 @@ public enum BridgeAcceptanceRun {
   static func report(_ step: String, _ detail: String = "") {
     let line = detail.isEmpty ? "acceptance: \(step)" : "acceptance: \(step) — \(detail)"
     FileHandle.standardError.write(Data((line + "\n").utf8))
+    // Also to unified logging. Bonjour publication needs the app launched
+    // through LaunchServices for macOS to apply local-network permission, and
+    // a LaunchServices launch has no terminal to write to — so stderr alone
+    // makes the one configuration that can advertise the one that cannot be
+    // observed.
+    OSLogSink().write(
+      RedactedLogEntry(timestamp: Date(), level: .error, code: line, counts: [:]))
   }
 
   /// Runs the whole path. Returns `true` only if a grant was stored.
