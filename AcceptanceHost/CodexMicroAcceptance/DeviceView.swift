@@ -16,6 +16,7 @@ struct DeviceView: View {
   let onSelect: (Int) -> Void
   let onCommand: (CommandKey) -> Void
   let onDial: (Int) -> Void
+  let onWorkflow: (JoystickWorkflow) -> Void
 
   var body: some View {
     VStack(spacing: 28) {
@@ -187,15 +188,62 @@ struct DeviceView: View {
     }
   }
 
+  /// A four-way pad. Each direction sends a scoped prompt to the selected
+  /// agent, which is the same thing typing it would do and spends the same
+  /// capability.
   private var joystick: some View {
-    VStack(spacing: 8) {
-      RoundedRectangle(cornerRadius: 20)
-        .stroke(Color.white.opacity(0.12), lineWidth: 10)
-        .frame(width: 92, height: 92)
-        .overlay(Image(systemName: "dpad").font(.title2))
-      Text("Workflows").font(.caption2)
+    let availability = JoystickWorkflow.availability(
+      in: surface, capabilities: capabilities)
+    return VStack(spacing: 8) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 20)
+          .stroke(
+            Color.white.opacity(availability.isAvailable ? 0.22 : 0.08), lineWidth: 10
+          )
+          .frame(width: 92, height: 92)
+        ForEach(JoystickWorkflow.allCases, id: \.rawValue) { workflow in
+          workflowButton(workflow, enabled: availability.isAvailable)
+        }
+      }
+      Text(availability.isAvailable ? "Workflows" : DeviceView.describe(availability))
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.35))
     }
     .frame(maxWidth: .infinity)
+    .foregroundStyle(.white.opacity(availability.isAvailable ? 0.9 : 0.25))
+  }
+
+  private func workflowButton(_ workflow: JoystickWorkflow, enabled: Bool) -> some View {
+    let offset: CGSize
+    switch workflow.direction {
+    case .up: offset = CGSize(width: 0, height: -30)
+    case .right: offset = CGSize(width: 32, height: 0)
+    case .down: offset = CGSize(width: 0, height: 30)
+    case .left: offset = CGSize(width: -32, height: 0)
+    }
+    return Button {
+      onWorkflow(workflow)
+    } label: {
+      Text(workflow.title)
+        .font(.system(size: 9, weight: .semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .frame(width: 52)
+    }
+    .buttonStyle(.plain)
+    .disabled(!enabled)
+    .offset(offset)
+    .accessibilityLabel("\(workflow.title) workflow")
+  }
+
+  static func describe(_ availability: CommandKeyAvailability) -> String {
+    switch availability {
+    case .available: return ""
+    case .notPermitted: return "Not permitted"
+    case .noSelection: return "Select an agent"
+    case .noRunningTurn: return "Not running"
+    case .notLive: return "Not connected"
+    }
   }
 }
 
