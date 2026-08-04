@@ -79,6 +79,22 @@ public enum BridgeAcceptanceRun {
   /// is exactly how a device that had successfully paired still reported
   /// `connectionFailed` a moment later.
   static func serveLoop(_ live: BridgeLiveComposition) async {
+    // **Start Codex before serving, and say whether it came up.** Constructing
+    // the assembly is not the same as the app-server completing its handshake:
+    // the supervisor stays un-ready until `start()` runs, and an un-ready
+    // supervisor turns every dispatched command into `codexUnavailable`. That
+    // is a press that was authorized, ledgered, and then quietly dropped one
+    // step short of Codex — the last gap in the chain.
+    if let runtime = live.runtime {
+      do {
+        try await runtime.start()
+        report("serve.codex", "\(await runtime.state())")
+      } catch {
+        report("serve.codexFailed", "\(error)")
+      }
+    } else {
+      report("serve.codexAbsent")
+    }
     // Every device the Mac already holds gets the working scope, so a phone
     // paired in an earlier run can connect and act without re-pairing.
     let snapshot = try? await live.authority.macAdministrationSnapshot()

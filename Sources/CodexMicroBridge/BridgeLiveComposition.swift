@@ -42,6 +42,7 @@ public struct BridgeLiveComposition: Sendable {
     workspaceRootsForRefresh: BridgeWorkspaceRootResolver,
     hostPublicKeyX963: Data,
     attribution: ThreadProjectTable,
+    runtime: CodexRuntimeSupervisor?,
     registryForGrants: BridgeProjectRegistry,
     pumpForRetention: BridgeObservationPump?,
     assemblyForDiagnostics: BridgeNetworkAssembly,
@@ -53,6 +54,7 @@ public struct BridgeLiveComposition: Sendable {
     self.workspaceRoots = workspaceRootsForRefresh
     self.hostPublicKeyX963 = hostPublicKeyX963
     self.attribution = attribution
+    self.runtime = runtime
     self.registry = registryForGrants
     self.pump = pumpForRetention
     self.assembly = assemblyForDiagnostics
@@ -74,6 +76,8 @@ public struct BridgeLiveComposition: Sendable {
   /// Which project a thread belongs to. The gateway scopes every command
   /// through this, so an unattributed thread is refused.
   public let attribution: ThreadProjectTable
+  /// The Codex runtime the gateway dispatches to, when there is one.
+  public let runtime: CodexRuntimeSupervisor?
 
   @MainActor
   public static func make(
@@ -203,6 +207,7 @@ public struct BridgeLiveComposition: Sendable {
       workspaceRootsForRefresh: roots,
       hostPublicKeyX963: hostSigner.hostPublicKeyX963,
       attribution: attribution,
+      runtime: codex?.runtime,
       registryForGrants: registry,
       pumpForRetention: pump,
       assemblyForDiagnostics: assembly,
