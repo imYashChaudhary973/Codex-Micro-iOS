@@ -36,6 +36,13 @@ public protocol CodexRuntimeSession: Sendable {
   /// Interrupts exactly one turn.
   func interruptTurn(threadID: String, turnID: String) async throws
 
+  /// Opens a thread and returns its opaque identifier.
+  ///
+  /// Invokes no model and consumes no allowance — it opens a conversation
+  /// rather than running one, which is why it sits on this seam alongside the
+  /// operations that do.
+  func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String
+
   /// Starts exactly one phone-originated turn under bridge-resolved settings
   /// and returns its opaque turn identifier.
   func startTurn(

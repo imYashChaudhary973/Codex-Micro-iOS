@@ -111,6 +111,28 @@ public enum BridgeAcceptanceRun {
       _ = live.attribution.attribute(threadID: "probe-thread", projectID: project.projectID)
       report("serve.probeThread", "attributed")
     }
+    // Open one real Codex thread so a press has something real to act on.
+    //
+    // `thread/start` invokes no model and consumes no allowance — that is the
+    // whole reason it is used here instead of starting a turn. Without it the
+    // only thread a press can name is one Codex has never heard of, and the
+    // honest answer to that press is "there is nothing here", which proves the
+    // transport and not the product.
+    if let runtime = live.runtime,
+      let project = await live.registry.register(
+        rootPath: FileManager.default.currentDirectoryPath)
+    {
+      do {
+        let threadID = try await runtime.startThread(
+          projectID: project.projectID,
+          policy: PhoneTurnPolicy.resolve(effectiveProfile: .observe, writableRoots: [])
+        )
+        _ = live.attribution.attribute(threadID: threadID, projectID: project.projectID)
+        report("serve.thread", "opened on Codex and attributed")
+      } catch {
+        report("serve.threadFailed", "\(error)")
+      }
+    }
     report("serve.ready", "press keys on the phone; results appear on the Mac")
 
     // Stay up. The listener and the gateway do the work; this only keeps the
