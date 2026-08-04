@@ -17,12 +17,15 @@ struct DeviceView: View {
   let onCommand: (CommandKey) -> Void
   let onDial: (Int) -> Void
   let onWorkflow: (JoystickWorkflow) -> Void
+  let approvals: ApprovalKeyState
+  let onApproval: (CompanionApprovalDecision) -> Void
 
   var body: some View {
     VStack(spacing: 28) {
       connectionBanner
       agentKeys
       Divider().overlay(Color.white.opacity(0.08))
+      approvalBanner
       commandKeys
       controls
       Spacer(minLength: 0)
@@ -63,6 +66,78 @@ struct DeviceView: View {
         AgentKeyView(key: key, isSelected: key.slot == surface.selectedSlot)
           .onTapGesture { onSelect(key.slot) }
       }
+    }
+  }
+
+  // MARK: - Approvals
+
+  /// The pending approval, shown **above** the keys that would answer it.
+  ///
+  /// The layout is the guarantee: the request and the buttons are one block,
+  /// so a decision cannot be made from a screen that is not also showing what
+  /// is being decided. When the Mac has not disclosed the content, the banner
+  /// says so in the same place — approving blind stays possible and stops
+  /// being accidental.
+  @ViewBuilder
+  private var approvalBanner: some View {
+    if let request = approvals.presented {
+      VStack(alignment: .leading, spacing: 8) {
+        Label(
+          "\(request.kind.rawValue.capitalized) approval waiting",
+          systemImage: "exclamationmark.shield"
+        )
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(.orange)
+
+        if let summary = request.summary, !summary.isEmpty {
+          Text(summary)
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.85))
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          Text("The request is not shown on this device. Review it on the Mac before approving.")
+            .font(.caption)
+            .foregroundStyle(.yellow.opacity(0.9))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        HStack(spacing: 10) {
+          ForEach(request.availableDecisions, id: \.rawValue) { decision in
+            Button {
+              onApproval(decision)
+            } label: {
+              Text(Self.title(for: decision))
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .background(
+                  RoundedRectangle(cornerRadius: 8)
+                    .fill(Self.tint(for: decision).opacity(0.22))
+                )
+                .foregroundStyle(Self.tint(for: decision))
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+      .padding(12)
+      .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05)))
+    }
+  }
+
+  static func title(for decision: CompanionApprovalDecision) -> String {
+    switch decision {
+    case .approveOnce: return "Approve once"
+    case .decline: return "Decline"
+    case .cancel: return "Cancel turn"
+    }
+  }
+
+  static func tint(for decision: CompanionApprovalDecision) -> Color {
+    switch decision {
+    case .approveOnce: return .green
+    case .decline: return .orange
+    case .cancel: return .red
     }
   }
 

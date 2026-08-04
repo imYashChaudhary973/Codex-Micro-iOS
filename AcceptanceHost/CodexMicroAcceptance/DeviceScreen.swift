@@ -22,6 +22,7 @@ struct DeviceScreen: View {
   @State private var capabilities: Set<DeviceCapability> = []
   @State private var reasoningEfforts: [String] = []
   @State private var requestedEffort: String?
+  @State private var pendingApprovals: [SecureApprovalRequest] = []
 
   var body: some View {
     DeviceView(
@@ -39,6 +40,11 @@ struct DeviceScreen: View {
       onWorkflow: { _ in
         // Sending is wired with the rest of the command path; availability
         // already governs whether the pad is reachable at all.
+      },
+      approvals: approvalKeys,
+      onApproval: { _ in
+        // Sending rides the same command path as every other key; the state
+        // above already refuses to produce a command for anything unshown.
       }
     )
     .onAppear {
@@ -74,6 +80,12 @@ struct DeviceScreen: View {
       surface: surface,
       capabilities: capabilities
     )
+  }
+
+  /// The approval keys, derived so they cannot drift from what is displayed.
+  private var approvalKeys: ApprovalKeyState {
+    ApprovalKeyState.resolve(
+      pending: pendingApprovals, surface: surface, capabilities: capabilities)
   }
 
   /// Runs a command key.
