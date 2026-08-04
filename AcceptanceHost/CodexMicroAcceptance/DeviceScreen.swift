@@ -35,6 +35,10 @@ struct DeviceScreen: View {
       onCommand: perform,
       onDial: { delta in
         if let next = dialState.stepped(by: delta) { requestedEffort = next }
+      },
+      onWorkflow: { _ in
+        // Sending is wired with the rest of the command path; availability
+        // already governs whether the pad is reachable at all.
       }
     )
     .onAppear {
