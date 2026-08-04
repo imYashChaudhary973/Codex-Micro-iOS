@@ -110,6 +110,33 @@ public final class PairingClient: NSObject, URLSessionDelegate, @unchecked Senda
     }
   }
 
+  /// Sends one already-sealed application frame.
+  ///
+  /// Separate from ``send(_:)`` because a sealed frame is opaque bytes: it has
+  /// no handshake envelope around it and must not acquire one. The listener
+  /// distinguishes handshake from application traffic by session state, not by
+  /// framing.
+  public func sendRaw(_ frame: Data) async throws {
+    guard let task else { throw Failure.connectionClosed }
+    try await task.send(.data(frame))
+  }
+
+  /// Receives one already-sealed application frame.
+  public func receiveRaw() async throws -> Data {
+    guard let task else { throw Failure.connectionClosed }
+    let message: URLSessionWebSocketTask.Message
+    do {
+      message = try await task.receive()
+    } catch {
+      throw lock.withLock { pinFailure } ?? Failure.connectionClosed
+    }
+    switch message {
+    case .data(let data): return data
+    case .string: throw Failure.malformedReply
+    @unknown default: throw Failure.malformedReply
+    }
+  }
+
   /// Sends one envelope without expecting a reply. The confirmation message is
   /// like this: the host closes the connection either way, so waiting for a
   /// reply would only ever time out.
@@ -167,6 +194,50 @@ public final class PairingClient: NSObject, URLSessionDelegate, @unchecked Senda
   }
 }
 
+/// The wire form of an application message, mirrored on the phone.
+///
+/// `ListenerApplicationEnvelope` lives in `MacBridgeServer`, which is
+/// macOS-only. The phone restates the two fields and the kind vocabulary; a
+/// divergence is a closed `protocolViolation` at the listener, and
+/// `PhoneApplicationContractTests` on the Mac side states each kind a second
+/// time so it fails in CI instead.
+public struct ListenerApplicationEnvelopeWire: Codable, Equatable, Sendable {
+  /// Must match `ListenerApplicationKind` on the Mac.
+  public enum Kind: String, Codable, CaseIterable, Sendable {
+    case observationSubscribe
+    case observationAcknowledge
+    case commandRequest
+    case observationDelivery
+    case commandResult
+    case closeNotice
+
+    /// Whether a device may send this kind. Mirrors the listener's inbound
+    /// allowlist; the phone refuses to *receive* one of these for the same
+    /// reason the host refuses to receive the others.
+    public var isDeviceOriginated: Bool {
+      switch self {
+      case .observationSubscribe, .observationAcknowledge, .commandRequest: return true
+      case .observationDelivery, .commandResult, .closeNotice: return false
+      }
+    }
+  }
+
+  public let kind: Kind
+  public let payload: Data
+
+  public init(kind: Kind, payload: Data) throws {
+    guard !payload.isEmpty else { throw PairingClient.Failure.malformedReply }
+    self.kind = kind
+    self.payload = payload
+  }
+
+  public func encoded() throws -> Data { try JSONEncoder().encode(self) }
+
+  public static func decode(_ data: Data) throws -> ListenerApplicationEnvelopeWire {
+    try JSONDecoder().decode(ListenerApplicationEnvelopeWire.self, from: data)
+  }
+}
+
 /// The wire form of a handshake envelope, mirrored on the phone.
 ///
 /// `ListenerHandshakeEnvelope` lives in `MacBridgeServer`, which is macOS-only
@@ -182,6 +253,7 @@ public struct ListenerHandshakeEnvelopeWire: Codable, Equatable, Sendable {
     case pairingConfirmation
     case sessionAuthRequest
     case sessionAuthResponse
+    case sessionAuthConfirmation
     case closeNotice
   }
 

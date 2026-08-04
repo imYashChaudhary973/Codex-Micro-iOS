@@ -538,3 +538,47 @@ final class RepairedDeviceTests: XCTestCase {
     XCTAssertEqual(before.devicePublicKey, after.devicePublicKey)
   }
 }
+
+/// The phone's mirrored wire vocabularies.
+///
+/// The phone cannot import `MacBridgeServer`, so it restates the handshake and
+/// application kinds as its own enums. A missing case is not a cosmetic
+/// divergence — it is a message the phone can never send or recognise, and it
+/// fails as a closed `protocolViolation` that looks like a transport problem.
+/// One case (`sessionAuthConfirmation`) was in fact missing from the first
+/// mirror and was caught only by the compiler happening to need it.
+///
+/// These assertions are the second, independent statement of each vocabulary.
+final class PhoneWireVocabularyTests: XCTestCase {
+  func testTheHandshakeKindsMatchWhatThePhoneMirrors() {
+    XCTAssertEqual(
+      Set(ListenerHandshakeKind.allCases.map(\.rawValue)),
+      [
+        "pairingRequest", "pairingResponse", "pairingConfirmation",
+        "sessionAuthRequest", "sessionAuthResponse", "sessionAuthConfirmation",
+        "closeNotice",
+      ])
+  }
+
+  func testTheApplicationKindsMatchWhatThePhoneMirrors() {
+    XCTAssertEqual(
+      Set(ListenerApplicationKind.allCases.map(\.rawValue)),
+      [
+        "observationSubscribe", "observationAcknowledge", "commandRequest",
+        "observationDelivery", "commandResult", "closeNotice",
+      ])
+  }
+
+  /// The inbound allowlist is the security-relevant half: it decides what a
+  /// device may send. The phone mirrors it to decide what it may *receive*,
+  /// so the two must agree on every case.
+  func testTheDeviceOriginatedAllowlistIsExactlyTheThreeDeviceMessages() {
+    let deviceOriginated = ListenerApplicationKind.allCases
+      .filter(\.isDeviceOriginated)
+      .map(\.rawValue)
+
+    XCTAssertEqual(
+      Set(deviceOriginated),
+      ["observationSubscribe", "observationAcknowledge", "commandRequest"])
+  }
+}

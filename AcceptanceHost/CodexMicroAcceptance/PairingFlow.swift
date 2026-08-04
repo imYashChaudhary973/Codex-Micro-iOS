@@ -103,6 +103,12 @@ public actor PhonePairingFlow {
         SecurePairingResponse.self, from: envelope.payload)
       let verified = try attempt.verifyHostResponse(response)
       verification = verified
+      // Remember the host now, while the verified response is in hand. The
+      // host's long-term public key is only available here — the QR carries a
+      // fingerprint of it, and a fingerprint cannot verify a signature. Losing
+      // this is why the phone could pair and then never reconnect.
+      try? PairedHostStore.save(
+        PairedHost(payload: payload, hostPublicKeyX963: response.hostPublicKey))
       await set(.comparing(words: verified.verificationPhrase.displayWords))
     } catch let failure as PairingClient.Failure {
       // A pin mismatch is the one failure worth naming distinctly on screen:
