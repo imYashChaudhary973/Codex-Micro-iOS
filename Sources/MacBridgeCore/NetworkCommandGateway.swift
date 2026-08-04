@@ -118,8 +118,15 @@ public actor NetworkCommandGateway {
   /// not, so a freshly paired device cannot start or steer a turn no matter
   /// what it sends. `steerTurn` is gated a **third** time, by the turn's own
   /// recorded policy.
+  /// `startThread` is gated **three** times: it must be on this list, the
+  /// grant must carry `.startThread` (the pairing default does not), and the
+  /// Mac must have supplied a thread starter — the default refuses. Step
+  /// 2.12 deferred it pending a decision on whether v1 permits new threads;
+  /// the device's dedicated key answers that, and the deferral's own terms
+  /// are kept: the Mac chooses the project and the sandbox, and the phone
+  /// supplies only the prompt.
   public static let allowedCommandKinds: Set<CompanionCommandKind> = [
-    .interruptTurn, .markThreadRead, .sendPrompt, .steerTurn,
+    .interruptTurn, .markThreadRead, .sendPrompt, .steerTurn, .startThread,
   ]
 
   private let authority: DeviceGrantAuthority
@@ -129,6 +136,7 @@ public actor NetworkCommandGateway {
   private let runtime: any NetworkRuntimeReadiness
   private let responder: any CodexApprovalResponding
   private let turnStarter: any CodexTurnStarting
+  private let threadStarter: any CodexThreadStarting
   private let turnSteerer: any CodexTurnSteering
   private let turnPolicies: TurnPolicyRegistry
   private let workspaceRoots: any WorkspaceRootResolving
@@ -143,6 +151,7 @@ public actor NetworkCommandGateway {
     runtime: any NetworkRuntimeReadiness,
     responder: any CodexApprovalResponding,
     turnStarter: any CodexTurnStarting,
+    threadStarter: any CodexThreadStarting = DeniedThreadStarter(),
     turnSteerer: any CodexTurnSteering,
     turnPolicies: TurnPolicyRegistry = TurnPolicyRegistry(),
     workspaceRoots: any WorkspaceRootResolving = DeniedWorkspaceRootResolver(),
@@ -156,6 +165,7 @@ public actor NetworkCommandGateway {
     self.runtime = runtime
     self.responder = responder
     self.turnStarter = turnStarter
+    self.threadStarter = threadStarter
     self.turnSteerer = turnSteerer
     self.turnPolicies = turnPolicies
     self.workspaceRoots = workspaceRoots
@@ -358,7 +368,10 @@ public actor NetworkCommandGateway {
     case .steerTurn(let threadID, let turnID, let prompt):
       return await performSteerTurn(
         plan, threadID: threadID, turnID: turnID, prompt: prompt, now: now)
-    case .selectThread, .startThread, .resolveApproval:
+    case .startThread(let projectID, let prompt, _):
+      return await performStartThread(
+        plan, projectID: projectID, prompt: prompt, now: now)
+    case .selectThread, .resolveApproval:
       // Unreachable: the allowlist refused these before the claim existed.
       return await finish(
         plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
@@ -449,6 +462,67 @@ public actor NetworkCommandGateway {
   /// leave a non-terminal record if the bridge stops mid-flight, and a
   /// non-terminal record is crash-ambiguous either way — it resolves to
   /// `outcomeUnknown` and is never resent.
+  /// Creates a thread and runs its first turn.
+  ///
+  /// Two external calls behind one command identifier, which is why the
+  /// ordering matters: the thread is created first and its identifier is
+  /// recorded before the turn is attempted, so a failure between them leaves
+  /// a thread the user can find rather than an orphan the ledger cannot name.
+  /// A turn that then fails resolves to `outcomeUnknown` for the same reason
+  /// every other external call does — it may have started.
+  private func performStartThread(
+    _ plan: ExecutionPlan,
+    projectID: String,
+    prompt: String,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    let roots = workspaceRoots.writableRoots(forProjectID: projectID)
+    let policy = PhoneTurnPolicy.resolve(
+      effectiveProfile: plan.effectiveProfile, writableRoots: roots)
+
+    let threadID: String
+    do {
+      threadID = try await threadStarter.startThread(projectID: projectID, policy: policy)
+    } catch {
+      // Nothing was created, so this is a clean refusal rather than an
+      // unknown: no thread exists for the user to reconcile.
+      try? await ledger.markOutcomeUnknown(
+        commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
+
+    let turnID: String
+    do {
+      turnID = try await turnStarter.startTurn(
+        threadID: threadID, prompt: prompt, policy: policy)
+    } catch {
+      try? await ledger.markSubmitted(
+        commandID: plan.command.commandID, threadID: threadID, turnID: nil,
+        requestID: nil, at: now)
+      try? await ledger.markOutcomeUnknown(
+        commandID: plan.command.commandID, resultCode: .codexUnavailable, at: now)
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
+
+    try? await ledger.markSubmitted(
+      commandID: plan.command.commandID, threadID: threadID, turnID: turnID,
+      requestID: nil, at: now)
+    // Record what the turn runs under, so a later steer can be proven rather
+    // than assumed — identical to the sendPrompt path, because a first turn is
+    // no different from any other once it exists.
+    await turnPolicies.record(
+      RecordedTurnPolicy(
+        threadID: threadID,
+        turnID: turnID,
+        effectiveProfile: plan.effectiveProfile,
+        policy: policy,
+        startedByDeviceID: plan.deviceID
+      )
+    )
+    return await finish(
+      plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
+  }
+
   private func performSendPrompt(
     _ plan: ExecutionPlan,
     threadID: String,

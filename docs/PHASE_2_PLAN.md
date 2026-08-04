@@ -125,6 +125,12 @@ The planning PR containing this document merges before implementation. Each step
 
 Steps 2.10–2.13 begin only after Step 2.9 establishes a merged and green P0 network boundary. They are sequenced because they share the command gateway, status, and protocol surfaces. Step 2.12 is implemented or closed by a recorded deferral. Step 2.14's implementation PR merges last; physical acceptance then runs on the resulting squash-merged `main` SHA, which is the only commit eligible for the acceptance tag. No two active branches may edit `PHASE_2_STATUS.md` or the same gateway/security-contract file.
 
+### Step 2.12 deferral reversed in Phase 3
+
+`startThread` was closed at Step 2.12 by a recorded product decision: v1 was read/respond/control-only pending a decision on whether new threads were in scope. The Codex Micro has a dedicated "new chat" key, which answers that question, so Phase 3 Step 3.8 reverses the deferral.
+
+The deferral's own conditions are kept rather than discarded. The capability is not in the pairing default, the Mac chooses the project and the sandbox, the phone supplies only a prompt, and the Mac must additionally supply a thread starter — the default refuses, so a bridge that has not opted in creates nothing regardless of what a grant says.
+
 ## 5. Commit, review, and merge cadence
 
 `docs/GIT_WORKFLOW.md` remains authoritative. Phase 2 adds the following security-specific rules:

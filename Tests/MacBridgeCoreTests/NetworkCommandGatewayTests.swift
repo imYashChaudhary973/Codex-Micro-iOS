@@ -193,8 +193,7 @@ final class NetworkCommandGatewayTests: XCTestCase {
   func testEveryCommandOutsideTheAllowlistIsRejected() async throws {
     let world = try await World()
     let bodies: [ClientCommandBody] = [
-      .selectThread(threadID: "thread-a"),
-      .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: []),
+      .selectThread(threadID: "thread-a")
     ]
 
     for body in bodies {
@@ -207,38 +206,49 @@ final class NetworkCommandGatewayTests: XCTestCase {
   func testTheAllowlistIsExactlyTheEnabledMutations() {
     XCTAssertEqual(
       NetworkCommandGateway.allowedCommandKinds,
-      [.interruptTurn, .markThreadRead, .sendPrompt, .steerTurn]
+      [.interruptTurn, .markThreadRead, .sendPrompt, .steerTurn, .startThread]
     )
   }
 
-  /// Step 2.12 was closed by a recorded product decision: v1 is
-  /// read/respond/control-only and the phone may not create threads.
+  /// Step 2.12 deferred `startThread` pending a decision on whether v1 permits
+  /// new threads. The Codex Micro has a dedicated "new chat" key, which
+  /// answers it, so the deferral is reversed in Phase 3 Step 3.8.
   ///
-  /// This test is the enforcement of that decision, not a restatement of it.
-  /// `startThread` must stay off the allowlist and must stay denied for a
-  /// grant that carries the `.startThread` capability and every profile —
-  /// so adding it back requires deliberately deleting this test, which is
-  /// exactly the moment the decision should be revisited.
-  func testStartThreadStaysClosedByTheRecordedStepTwelveDeferral() async throws {
-    XCTAssertFalse(NetworkCommandGateway.allowedCommandKinds.contains(.startThread))
+  /// The deferral's own conditions survive the reversal, and this test is
+  /// their enforcement: the capability is not in the pairing default, and the
+  /// Mac must additionally supply a thread starter. A device that has the
+  /// capability still cannot create a thread on a bridge that has not opted
+  /// in.
+  func testStartThreadNeedsBothTheCapabilityAndAMacThatOptedIn() async throws {
+    XCTAssertTrue(NetworkCommandGateway.allowedCommandKinds.contains(.startThread))
 
-    for profile in MobileActionProfile.allCases {
-      let world = try await World(
-        capabilities: Set(DeviceCapability.allCases), profile: profile)
-      let command = try ClientCommand(
-        commandID: UUID(),
-        issuedAt: World.now,
-        body: .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: [])
-      )
+    // No capability: refused on the grant, whatever the Mac supplies.
+    let withoutCapability = try await World(
+      capabilities: [.view, .runAgent], profile: .runWorkspace)
+    let command = try ClientCommand(
+      commandID: UUID(), issuedAt: World.now,
+      body: .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: []))
+    let denied = await withoutCapability.gateway.execute(
+      command: command, context: withoutCapability.context)
+    XCTAssertEqual(denied, .denied(.capabilityMissing))
 
-      let outcome = await world.gateway.execute(command: command, context: world.context)
-
-      XCTAssertEqual(outcome, .denied(.unsupportedCommand), "\(profile)")
-      let record = await world.ledger.record(commandID: command.commandID)
-      XCTAssertNil(record, "a refused startThread must leave no ledger record")
-      let starts = await world.turnStarter.startCount
-      XCTAssertEqual(starts, 0)
+    // With the capability but no thread starter, the Mac's default refuses.
+    // The command resolves to outcomeUnknown rather than a denial because the
+    // refusal happens at the runtime call, after the claim — the same shape as
+    // any other external call that does not answer.
+    let optedOut = try await World(
+      capabilities: Set(DeviceCapability.allCases), profile: .runWorkspace)
+    let second = try ClientCommand(
+      commandID: UUID(), issuedAt: World.now,
+      body: .startThread(projectID: "project-a", prompt: "hi", attachmentIDs: []))
+    let outcome = await optedOut.gateway.execute(
+      command: second, context: optedOut.context)
+    guard case .outcomeUnknown = outcome else {
+      XCTFail("a bridge with no thread starter created a thread: \(outcome)")
+      return
     }
+    let starts = await optedOut.turnStarter.startCount
+    XCTAssertEqual(starts, 0, "a turn ran without a thread")
   }
 
   /// Both agent commands are on the allowlist but gated a second time by the
