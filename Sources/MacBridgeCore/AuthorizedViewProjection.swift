@@ -27,6 +27,10 @@ public struct AuthorizedViewScope: Equatable, Sendable {
   /// device is told it may do nothing rather than being told what it used to
   /// be allowed.
   public let capabilities: Set<DeviceCapability>
+  /// Reasoning-effort values this host offers, in the model's advertised
+  /// order. Empty when the host offers none, which the dial shows as having
+  /// nothing to choose between rather than inventing positions.
+  public let reasoningEfforts: [String]
 
   /// Derives the scope from the authoritative record.
   public init(grant: AuthoritativeDeviceGrant) {
@@ -37,6 +41,43 @@ public struct AuthorizedViewScope: Equatable, Sendable {
     self.allowsObservation = allowsObservation
     self.permittedProjectIDs = allowsObservation ? grant.permittedProjectIDs : []
     self.capabilities = allowsObservation ? grant.capabilities : []
+    self.reasoningEfforts = []
+  }
+
+  /// Adds the host's advertised reasoning efforts to a scope.
+  ///
+  /// Separate from the grant because the efforts are a property of the model
+  /// the host is running, not of the device's authorization. A revoked device
+  /// still reports none, because its capabilities are empty and the dial is
+  /// unavailable on that basis alone.
+  public func offering(reasoningEfforts efforts: [String]) -> AuthorizedViewScope {
+    AuthorizedViewScope(
+      deviceID: deviceID,
+      grantRevision: grantRevision,
+      authorizedViewEpoch: authorizedViewEpoch,
+      permittedProjectIDs: permittedProjectIDs,
+      allowsObservation: allowsObservation,
+      capabilities: capabilities,
+      reasoningEfforts: allowsObservation ? efforts : []
+    )
+  }
+
+  init(
+    deviceID: UUID,
+    grantRevision: UInt64,
+    authorizedViewEpoch: UInt64,
+    permittedProjectIDs: Set<String>,
+    allowsObservation: Bool,
+    capabilities: Set<DeviceCapability>,
+    reasoningEfforts: [String]
+  ) {
+    self.deviceID = deviceID
+    self.grantRevision = grantRevision
+    self.authorizedViewEpoch = authorizedViewEpoch
+    self.permittedProjectIDs = permittedProjectIDs
+    self.allowsObservation = allowsObservation
+    self.capabilities = capabilities
+    self.reasoningEfforts = reasoningEfforts
   }
 
   /// Whether a resolved project is inside this device's current view. An
@@ -243,7 +284,8 @@ public enum AuthorizedSnapshotProjection {
       let filtered = try? SecureObservationSnapshot(
         generatedAtEpochSeconds: UInt64(max(0, snapshot.generatedAt.timeIntervalSince1970)),
         threads: observed,
-        capabilities: scope.capabilities
+        capabilities: scope.capabilities,
+        reasoningEfforts: scope.reasoningEfforts
       )
     else {
       throw ObservationProjectionError.projectionOversized

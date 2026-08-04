@@ -20,16 +20,22 @@ struct DeviceScreen: View {
   @State private var isConnected = false
   @State private var selectedSlot: Int?
   @State private var capabilities: Set<DeviceCapability> = []
+  @State private var reasoningEfforts: [String] = []
+  @State private var requestedEffort: String?
 
   var body: some View {
     DeviceView(
       surface: surface,
       capabilities: capabilities,
+      dial: dialState,
       onSelect: { slot in
         selectedSlot = surface.selectedSlot == slot ? nil : slot
         reproject()
       },
-      onCommand: perform
+      onCommand: perform,
+      onDial: { delta in
+        if let next = dialState.stepped(by: delta) { requestedEffort = next }
+      }
     )
     .onAppear {
       bindings = AgentKeyBindingStore.load()
@@ -53,6 +59,17 @@ struct DeviceScreen: View {
       AgentKeyBindingStore.save(filled)
     }
     reproject()
+  }
+
+  /// The dial, derived rather than stored, so it cannot drift from the
+  /// surface it describes.
+  private var dialState: ReasoningDialState {
+    ReasoningDialState.resolve(
+      positions: reasoningEfforts,
+      requested: requestedEffort,
+      surface: surface,
+      capabilities: capabilities
+    )
   }
 
   /// Runs a command key.
