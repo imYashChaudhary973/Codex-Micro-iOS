@@ -10,7 +10,10 @@ public enum CompanionCommandKind: String, Codable, CaseIterable, Sendable {
   case markThreadRead
 }
 
-public enum CompanionApprovalDecision: String, Codable, Sendable {
+/// `Hashable` so a payload can assert its decisions are distinct: offering
+/// the same decision twice would render two identical keys, one of which is
+/// meaningless.
+public enum CompanionApprovalDecision: String, Codable, Hashable, Sendable {
   case approveOnce
   case decline
   case cancel
