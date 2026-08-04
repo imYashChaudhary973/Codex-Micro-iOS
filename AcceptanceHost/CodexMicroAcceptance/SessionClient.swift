@@ -19,6 +19,11 @@ public actor SessionClient {
     case notPaired
     case connectionFailed
     case authenticationFailed
+    /// Authentication failed with a reason worth naming.
+    ///
+    /// The catch-all was hiding which step broke, which made a working
+    /// transport and a rejected identity look identical from the phone.
+    case authenticationRejected(String)
     case sessionClosed(SecureCloseReason)
     case malformedReply
     case notAuthenticated
@@ -58,7 +63,11 @@ public actor SessionClient {
         hostTLSSPKIFingerprint: host.tlsSPKIFingerprint
       ).beginAuthentication()
     } catch {
-      throw Failure.authenticationFailed
+      // Thrown before any network activity: either the pinned host key or the
+      // stored fingerprint failed validation, or the protocol selection was
+      // refused. Naming it matters because none of those is a network fault
+      // and all three read as one from the screen.
+      throw Failure.authenticationRejected("begin:\(type(of: error)):\(error)")
     }
 
     guard let origin = URL(string: host.endpointOrigin), let hostname = origin.host,
@@ -99,10 +108,14 @@ public actor SessionClient {
       client.close()
       self.client = nil
       throw Failure.sessionClosed(reason.closeReason(in: .authenticatedSession))
+    } catch let failure as Failure {
+      client.close()
+      self.client = nil
+      throw failure
     } catch {
       client.close()
       self.client = nil
-      throw Failure.authenticationFailed
+      throw Failure.authenticationRejected("\(type(of: error)):\(error)")
     }
   }
 
