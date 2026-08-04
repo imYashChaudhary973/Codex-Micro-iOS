@@ -158,7 +158,19 @@ public actor SessionClient {
     do {
       body = try open.inbound.open(sealed)
     } catch {
-      throw Failure.sessionClosed(.counterViolation)
+      // A host that closes an authenticated session writes a plaintext
+      // close notice, not a sealed frame. Opening it fails on the version
+      // byte — it is `{`, the start of JSON — so the honest reading of an
+      // unopenable first frame is "the host closed and told us why", not
+      // "the crypto disagrees". Reporting the reason is what makes the
+      // difference visible; collapsing it to a counter violation is what
+      // sent this chase after the frame codecs for three rounds.
+      if let notice = try? ListenerHandshakeEnvelopeWire.decode(sealed),
+        notice.kind == .closeNotice
+      {
+        throw Failure.sessionClosed(.protocolViolation)
+      }
+      throw Failure.authenticationRejected("open:\(type(of: error)):\(error)")
     }
     session = open
     guard let envelope = try? ListenerApplicationEnvelopeWire.decode(body) else {
