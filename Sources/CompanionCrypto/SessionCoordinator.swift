@@ -646,6 +646,16 @@ public actor SessionCoordinator {
     }
   }
 
+  /// The identity of the device's current session, if it has one.
+  ///
+  /// Exists because a caller that knows only *which device* and *which
+  /// session* cannot reconstruct an identity to validate: identities compare
+  /// whole, connection included, so a fabricated connection ID never matches.
+  /// Handing back the real one lets every check in `validate` still run.
+  public func currentIdentity(deviceID: UUID) -> AuthenticatedSessionIdentity? {
+    store.state().sessions[deviceID]?.identity
+  }
+
   private static func requireCurrent(
     _ identity: AuthenticatedSessionIdentity,
     in state: AuthenticatedSessionState

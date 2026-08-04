@@ -71,14 +71,39 @@ public final class DeviceConnection: ObservableObject {
 
   // MARK: - Lifecycle
 
-  /// Connects, authenticates, and subscribes.
+  /// How many times a connect is attempted before the surface reports failure.
+  ///
+  /// A phone that gives up after one refusal stays dead until the app is
+  /// killed, which is what happened on the run where the Mac was still
+  /// finishing pairing when the Device tab appeared: one `connectionFailed`,
+  /// and the pad never tried again even though the Mac was up seconds later.
+  private static let connectAttempts = 5
+  private static let retryDelay = Duration.seconds(2)
+
+  /// Connects, authenticates, and subscribes, retrying a refusal.
   public func connect() async {
     guard readTask == nil else { return }
+    for attempt in 1...Self.connectAttempts {
+      if await attemptConnect() {
+        await runCommandProbeIfRequested()
+        return
+      }
+      // Not being paired is a standing fact, not a transient one. Retrying it
+      // would spin forever against a Mac this phone has no business reaching.
+      if status == .notPaired { return }
+      guard attempt < Self.connectAttempts else { break }
+      report("connect.retry", "\(attempt)")
+      try? await Task.sleep(for: Self.retryDelay)
+    }
+  }
+
+  /// One connect attempt. `true` once the read loop is running.
+  private func attemptConnect() async -> Bool {
     let stored = try? PairedHostStore.load()
     guard let host = stored ?? nil else {
       report("connect.notPaired")
       status = .notPaired
-      return
+      return false
     }
     report("connect.paired", "hostID known")
     guard let key = try? DeviceIdentity.load() ?? DeviceIdentity.create(),
@@ -90,7 +115,7 @@ public final class DeviceConnection: ObservableObject {
     else {
       report("connect.identityUnavailable")
       status = .failed("identityUnavailable")
-      return
+      return false
     }
 
     status = .connecting
@@ -115,7 +140,7 @@ public final class DeviceConnection: ObservableObject {
     } catch {
       report("connect.authFailed", Self.describe(error))
       status = .failed(Self.describe(error))
-      return
+      return false
     }
     report("connect.authenticated")
     self.session = session
@@ -132,10 +157,43 @@ public final class DeviceConnection: ObservableObject {
     } catch {
       report("connect.subscribeFailed")
       status = .failed("subscribeFailed")
-      return
+      return false
     }
     report("connect.subscribed")
     readTask = Task { [weak self] in await self?.readLoop(session) }
+    return true
+  }
+
+  /// Set to `1` to press the Stop key once, automatically, after connecting.
+  ///
+  /// The pad is driven by a finger, which makes the one thing worth proving —
+  /// that a key press on the phone reaches Codex on the Mac — unprovable
+  /// without one. This presses a real key through the real path: the same
+  /// `ClientCommandBody` the Stop key builds, the same session, the same
+  /// gateway. Nothing is stubbed and nothing is skipped.
+  ///
+  /// **Stop specifically, because it cannot spend anything.** Interrupting is
+  /// the only command that is meaningful against an idle Mac and consumes no
+  /// model allowance either way, so an automated press can never start work
+  /// the user did not ask for. A probe that sent a prompt would.
+  static let commandProbeKey = "CODEX_MICRO_COMMAND_PROBE"
+
+  private func runCommandProbeIfRequested() async {
+    guard ProcessInfo.processInfo.environment[Self.commandProbeKey] == "1" else { return }
+    // Give the subscription a moment to deliver the snapshot, so the probe
+    // presses against the thread the Mac actually reports rather than a
+    // guess. If none arrives the press still happens — a denial for an
+    // unknown thread is a real answer from the gateway, and proves the path.
+    for _ in 0..<20 where threads.isEmpty {
+      try? await Task.sleep(for: .milliseconds(250))
+    }
+    let thread = threads.first
+    report("probe.press", "interrupt thread=\(thread == nil ? "none" : "observed")")
+    let outcome = await send(
+      .interruptTurn(
+        threadID: thread?.threadID ?? "probe-thread",
+        turnID: thread?.activeTurnID ?? "probe-turn"))
+    report("probe.outcome", "\(outcome)")
   }
 
   public func disconnect() async {

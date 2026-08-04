@@ -96,6 +96,21 @@ public struct BridgePairingObserver: ListenerPairingObserving {
     }
   }
 
+  /// Reports a refused session on the Mac's own output.
+  ///
+  /// Goes to standard error rather than to the pairing model, because it is
+  /// not a pairing state: the device is already paired and is being turned
+  /// away for some other reason. Putting it in the model would overwrite a
+  /// finished pairing with a failure that is about something else.
+  public func sessionAuthenticationFailed(stage: String, reason: String) async {
+    FileHandle.standardError.write(
+      Data("codex-micro: session.refused.\(stage) — \(reason)\n".utf8))
+  }
+
+  public func sessionAuthenticated(deviceID: UUID) async {
+    FileHandle.standardError.write(Data("codex-micro: session.authenticated\n".utf8))
+  }
+
   public func pairingCompleted(_ proposal: PairedDeviceProposal) async {
     let deviceID = proposal.deviceID
     do {

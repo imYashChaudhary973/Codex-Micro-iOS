@@ -237,16 +237,19 @@ public struct SessionCoordinatorVerifier: NetworkSessionVerifying {
   }
 
   public func isCurrentSession(deviceID: UUID, sessionID: UUID) async -> Bool {
-    // The connection ID is not part of the question: the gateway asks whether
-    // *this device* still holds *this session*, and the registry keys on
-    // exactly that pair. A zero connection ID never matches a stored record
-    // by accident because `requireCurrent` compares the session ID.
-    let identity = AuthenticatedSessionIdentity(
-      sessionID: sessionID,
-      connectionID: sessionID,
-      deviceID: deviceID
-    )
-    guard let record = try? await coordinator.validate(identity) else { return false }
+    // **Ask with the session's real identity, never a reconstructed one.**
+    // `validate` compares identities whole — connection ID included — so
+    // passing a stand-in value made this return false for every command from
+    // every device: the transport worked, the grant was valid, and the
+    // gateway denied `revokedDevice` regardless. The lookup is by the pair the
+    // gateway actually knows, and the session ID is still checked, so a stale
+    // session is refused exactly as before.
+    guard let identity = await coordinator.currentIdentity(deviceID: deviceID),
+      identity.sessionID == sessionID,
+      let record = try? await coordinator.validate(identity)
+    else {
+      return false
+    }
     return record.identity.sessionID == sessionID && record.identity.deviceID == deviceID
   }
 }

@@ -287,9 +287,9 @@ public actor HardenedWSSListener {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
-    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
-    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
-    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
+    observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling,
+    frameProvider: any ListenerSessionFrameProviding,
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {
@@ -354,6 +354,9 @@ public actor HardenedWSSListener {
       rejections: rejections,
       logger: logger,
       handshake: handshake,
+      observation: observation,
+      commands: commands,
+      frameProvider: frameProvider,
       ceilings: ceilings,
       now: now
     )
@@ -368,9 +371,9 @@ public actor HardenedWSSListener {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
-    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
-    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
-    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
+    observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling,
+    frameProvider: any ListenerSessionFrameProviding,
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {
@@ -399,6 +402,9 @@ public actor HardenedWSSListener {
           rejections: rejections,
           logger: logger,
           handshake: handshake,
+          observation: observation,
+          commands: commands,
+          frameProvider: frameProvider,
           ceilings: ceilings,
           now: now
         )
@@ -534,9 +540,9 @@ public enum ListenerPipeline {
     rejections: ListenerRejectionRecorder,
     logger: any ListenerLogging,
     handshake: any ListenerHandshakeHandling,
-    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
-    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
-    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider(),
+    observation: any ListenerObservationHandling,
+    commands: any ListenerCommandHandling,
+    frameProvider: any ListenerSessionFrameProviding,
     ceilings: ListenerCeilings,
     now: @escaping @Sendable () -> UInt64
   ) -> EventLoopFuture<Void> {

@@ -40,6 +40,8 @@ public struct BridgeLiveComposition: Sendable {
   /// silently re-keyed bridge every paired phone would then reject.
   private init(
     workspaceRootsForRefresh: BridgeWorkspaceRootResolver,
+    hostPublicKeyX963: Data,
+    attribution: ThreadProjectTable,
     registryForGrants: BridgeProjectRegistry,
     pumpForRetention: BridgeObservationPump?,
     assemblyForDiagnostics: BridgeNetworkAssembly,
@@ -49,6 +51,8 @@ public struct BridgeLiveComposition: Sendable {
     authority: DeviceGrantAuthority
   ) {
     self.workspaceRoots = workspaceRootsForRefresh
+    self.hostPublicKeyX963 = hostPublicKeyX963
+    self.attribution = attribution
     self.registry = registryForGrants
     self.pump = pumpForRetention
     self.assembly = assemblyForDiagnostics
@@ -64,6 +68,12 @@ public struct BridgeLiveComposition: Sendable {
   public let registry: BridgeProjectRegistry
   /// The gateway's view of writable roots, refreshed when projects change.
   public let workspaceRoots: BridgeWorkspaceRootResolver
+  /// The host's signing key, as a device holds it after pairing. Exposed so an
+  /// in-process device can authenticate a session exactly as a phone does.
+  public let hostPublicKeyX963: Data
+  /// Which project a thread belongs to. The gateway scopes every command
+  /// through this, so an unattributed thread is refused.
+  public let attribution: ThreadProjectTable
 
   @MainActor
   public static func make(
@@ -91,9 +101,19 @@ public struct BridgeLiveComposition: Sendable {
       hostPublicKeyX963: hostSigner.hostPublicKeyX963,
       signer: hostSigner
     )
+    // **The TLS identity, not the host identity.** These are two different
+    // Enclave keys, and the session transcript binds the fingerprint of the
+    // certificate the listener actually serves — which is the TLS one, and
+    // which is what the device pinned at pairing and re-derives on every
+    // connect. Binding the host key here made the two sides compute different
+    // transcripts from the same handshake, so a correctly paired phone with a
+    // valid grant was refused with a bare `authenticationFailed` every time.
+    // Pairing was unaffected, which is exactly why this survived: the failure
+    // appeared only at the step after the one being tested.
+    let tlsIdentity = try makeIdentityStore().loadOrCreate(role: .tls).identity
     let sessions = try SessionCoordinator(
       hostID: BridgeHostIdentifier.stable(),
-      hostTLSSPKIFingerprint: hostIdentity.spkiFingerprint,
+      hostTLSSPKIFingerprint: tlsIdentity.spkiFingerprint,
       authority: GrantAuthoritySessionAuthority(authority: authority),
       signer: hostSigner,
       store: InMemoryAuthenticatedSessionStore()
@@ -181,6 +201,8 @@ public struct BridgeLiveComposition: Sendable {
 
     return BridgeLiveComposition(
       workspaceRootsForRefresh: roots,
+      hostPublicKeyX963: hostSigner.hostPublicKeyX963,
+      attribution: attribution,
       registryForGrants: registry,
       pumpForRetention: pump,
       assemblyForDiagnostics: assembly,

@@ -301,7 +301,7 @@ public actor ListenerSessionFrameRegistry: ListenerSessionFrameProviding {
   }
 
   public func takeFrames(connectionID: UUID) -> ListenerSessionFrames? {
-    pending.removeValue(forKey: connectionID)
+    return pending.removeValue(forKey: connectionID)
   }
 
   public func discardFrames(connectionID: UUID) {
