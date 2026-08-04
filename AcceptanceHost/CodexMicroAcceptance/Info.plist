@@ -23,6 +23,15 @@
 	     else and no image is stored or transmitted. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Codex Micro uses the camera once, to scan the pairing code shown on your Mac.</string>
+	<!--
+	  Push-to-talk. Recognition is forced on-device, so audio never leaves the
+	  phone; these permissions cover capturing it and running the recogniser
+	  locally, not sending it anywhere.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Codex Micro listens while you hold the talk key, so you can dictate a prompt instead of typing. Audio stays on this device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Codex Micro turns what you say into a prompt using on-device speech recognition. Audio is not sent anywhere.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

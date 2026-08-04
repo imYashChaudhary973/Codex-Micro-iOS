@@ -19,6 +19,9 @@ struct DeviceView: View {
   let onWorkflow: (JoystickWorkflow) -> Void
   let approvals: ApprovalKeyState
   let onApproval: (CompanionApprovalDecision) -> Void
+  let talkState: PushToTalkRecogniser.State
+  let onTalkDown: () -> Void
+  let onTalkUp: () -> Void
 
   var body: some View {
     VStack(spacing: 28) {
@@ -153,7 +156,38 @@ struct DeviceView: View {
       commandKey(.stop, "stop.fill", "Stop")
       commandKey(.steer, "arrow.triangle.turn.up.right.diamond", "Steer")
       commandKey(.markRead, "envelope.open", "Read")
+      talkKey
     }
+  }
+
+  /// Hold to dictate. A momentary key rather than a toggle, matching the
+  /// hardware: a microphone that stays on because you forgot to press stop is
+  /// a different product with a different threat model.
+  private var talkKey: some View {
+    let listening = if case .listening = talkState { true } else { false }
+    let unavailable = if case .unavailable = talkState { true } else { false }
+    return VStack(spacing: 5) {
+      Image(systemName: listening ? "waveform.circle.fill" : "mic.fill").font(.body)
+      Text("Talk").font(.caption2)
+    }
+    .frame(maxWidth: .infinity)
+    .frame(height: 58)
+    .background(
+      RoundedRectangle(cornerRadius: 10)
+        .fill((listening ? Color.red : Color.white).opacity(listening ? 0.25 : 0.10))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 10)
+        .stroke(Color.white.opacity(unavailable ? 0.07 : 0.22), lineWidth: 1)
+    )
+    .foregroundStyle(.white.opacity(unavailable ? 0.24 : 0.92))
+    .contentShape(Rectangle())
+    .gesture(
+      DragGesture(minimumDistance: 0)
+        .onChanged { _ in if !listening && !unavailable { onTalkDown() } }
+        .onEnded { _ in if listening { onTalkUp() } }
+    )
+    .accessibilityLabel(unavailable ? "Talk, unavailable" : "Hold to dictate a prompt")
   }
 
   private func commandKey(

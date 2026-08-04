@@ -23,6 +23,7 @@ struct DeviceScreen: View {
   @State private var reasoningEfforts: [String] = []
   @State private var requestedEffort: String?
   @State private var pendingApprovals: [SecureApprovalRequest] = []
+  @StateObject private var talk = PushToTalkRecogniser()
 
   var body: some View {
     DeviceView(
@@ -45,11 +46,24 @@ struct DeviceScreen: View {
       onApproval: { _ in
         // Sending rides the same command path as every other key; the state
         // above already refuses to produce a command for anything unshown.
+      },
+      talkState: talk.state,
+      onTalkDown: { talk.start() },
+      onTalkUp: {
+        talk.stop()
+        // The transcript becomes an ordinary prompt. Nothing downstream can
+        // tell it was dictated, which is the point.
+        if talk.transcript != nil { talk.reset() }
       }
     )
     .onAppear {
       bindings = AgentKeyBindingStore.load()
       reproject()
+    }
+    .task {
+      // Availability is resolved before first use so the key can show itself
+      // as unavailable rather than failing under a thumb.
+      await talk.prepare()
     }
   }
 
