@@ -142,7 +142,11 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
         record("startup.network.ready", level: .info)
         // The acceptance path runs only when the operator asks for it, and
         // exits when it is done so a run cannot be mistaken for a session.
-        if BridgeAcceptanceRun.isRequested || BridgeAcceptanceRun.awaitsRealDevice {
+        if BridgeAcceptanceRun.serves {
+          // Serve mode never returns; the process stays up so a phone can
+          // connect and act.
+          Task { await BridgeAcceptanceRun.serve(live) }
+        } else if BridgeAcceptanceRun.isRequested || BridgeAcceptanceRun.awaitsRealDevice {
           Task {
             let passed =
               BridgeAcceptanceRun.awaitsRealDevice

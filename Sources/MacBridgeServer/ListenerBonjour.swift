@@ -74,6 +74,29 @@ public protocol ListenerBonjourPublishing: Sendable {
 /// A listener with no wired publisher runs without discovery rather than
 /// advertising something unverified. Direct-endpoint pairing through the QR
 /// payload does not need Bonjour.
+/// Publishes the record on a bound hardened listener.
+///
+/// The record's content is entirely compile-time constants (Step 2.13); this
+/// only decides *when* it appears. Publication is applied to the `NWListener`
+/// the bind produced, so a record can never exist without a listener behind
+/// it — the failure mode where mDNS points at a closed port cannot be reached
+/// from here.
+public struct HardenedListenerBonjourPublisher: ListenerBonjourPublishing {
+  private let listener: HardenedWSSListener
+
+  public init(listener: HardenedWSSListener) {
+    self.listener = listener
+  }
+
+  public func publish() async throws {
+    try await listener.advertise()
+  }
+
+  public func remove() async throws {
+    await listener.withdraw()
+  }
+}
+
 public struct DisabledListenerBonjourPublisher: ListenerBonjourPublishing {
   public init() {}
 
@@ -100,7 +123,17 @@ public struct DisabledListenerBonjourPublisher: ListenerBonjourPublishing {
 /// The coordinator owns only that ordering; it binds no socket and publishes
 /// no record itself.
 public actor ListenerBonjourCoordinator {
-  private let publisher: any ListenerBonjourPublishing
+  /// Replaces the publisher before publication.
+  ///
+  /// The real publisher needs the listener the bind produced, which does not
+  /// exist when the coordinator is built. Swapping it in at enable time is
+  /// what lets the coordinator keep owning the ordering while the publisher
+  /// reaches the `NWListener` it must set the record on.
+  public func use(_ publisher: any ListenerBonjourPublishing) {
+    self.publisher = publisher
+  }
+
+  private var publisher: any ListenerBonjourPublishing
   private let logger: any ListenerLogging
   private var published = false
 

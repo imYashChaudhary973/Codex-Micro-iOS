@@ -62,10 +62,13 @@ struct DeviceScreen: View {
       bindings = AgentKeyBindingStore.load()
       layout = KeyLayoutStore.load()
     }
-    .task {
-      await talk.prepare()
-      await connection.connect()
-    }
+    // Two independent tasks, deliberately. Preparing dictation asks TCC for
+    // microphone and speech access, which blocks until someone answers a
+    // dialog. Sequencing the connection behind it meant the phone did not
+    // connect at all until an unrelated permission was granted — and the
+    // screen said only "not connected", which pointed at the network.
+    .task { await connection.connect() }
+    .task { await talk.prepare() }
     .onChange(of: connection.threads) { _, incoming in
       // Fill empty keys as threads appear. Established bindings never move.
       let filled = bindings.filling(from: incoming)
