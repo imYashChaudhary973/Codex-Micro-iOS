@@ -88,6 +88,25 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
     try await client.interruptTurn(threadID: threadID, turnID: turnID)
   }
 
+  public func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String {
+    // cwd and sandbox come from the policy the Mac resolved. The phone names
+    // a project it already has a grant for; it never names a path.
+    var parameters: [String: JSONValue] = [
+      "ephemeral": .bool(false),
+      "approvalPolicy": .string(policy.approvalPolicy.rawValue),
+      "sandbox": .string(policy.sandbox == .workspaceWrite ? "workspace-write" : "read-only"),
+    ]
+    if let root = policy.writableRoots.first {
+      parameters["cwd"] = .string(root)
+    }
+    let response = try await client.request(
+      method: "thread/start", params: .object(parameters))
+    guard let threadID = response["thread"]["id"].string, !threadID.isEmpty else {
+      throw CodexRuntimeRequestError.notReady
+    }
+    return threadID
+  }
+
   /// Starts one turn under settings the bridge resolved. The parameters come
   /// entirely from ``PhoneTurnPolicy``; the only phone-supplied value is the
   /// prompt, which travels as typed text content.

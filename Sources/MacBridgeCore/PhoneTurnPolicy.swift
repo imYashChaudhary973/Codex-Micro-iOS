@@ -161,6 +161,32 @@ public struct DeniedWorkspaceRootResolver: WorkspaceRootResolving {
 /// authority: responding to an approval answers a request Codex already
 /// raised, while starting a turn originates work. The production conformer is
 /// ``CodexRuntimeSupervisor``, which refuses unless the runtime is `ready`.
+/// Creates a thread on the Mac's terms.
+///
+/// Step 2.12 deferred `startThread` pending a decision on whether v1 permits
+/// new threads at all. The device answers that: it has a dedicated key. The
+/// deferral's own conditions are kept — the Mac chooses the project and the
+/// sandbox, and the phone supplies only the prompt — so reversing the decision
+/// does not widen what a phone may cause.
+///
+/// **This is off unless the Mac turns it on.** `DeniedThreadStarter` is the
+/// default, so a bridge that has not opted in refuses every attempt regardless
+/// of what a grant says.
+public protocol CodexThreadStarting: Sendable {
+  /// Creates a thread in `projectID` and returns its opaque identifier.
+  func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String
+}
+
+/// Refuses every thread creation. The default, so the capability is inert
+/// until a Mac deliberately supplies something else.
+public struct DeniedThreadStarter: CodexThreadStarting {
+  public init() {}
+
+  public func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String {
+    throw CodexRuntimeRequestError.notReady
+  }
+}
+
 public protocol CodexTurnStarting: Sendable {
   /// Starts one turn and returns its opaque turn identifier.
   func startTurn(
