@@ -22,10 +22,12 @@ struct DeviceView: View {
   let talkState: PushToTalkRecogniser.State
   let onTalkDown: () -> Void
   let onTalkUp: () -> Void
+  let statusLine: String
+  let onRemap: () -> Void
 
   var body: some View {
     VStack(spacing: 28) {
-      connectionBanner
+      header
       agentKeys
       Divider().overlay(Color.white.opacity(0.08))
       approvalBanner
@@ -44,6 +46,29 @@ struct DeviceView: View {
   /// The hardware has no way to say "the cable is out" except by going dark,
   /// which is unambiguous when you can see the cable and useless on a phone.
   /// This says it in words, and only when something is wrong.
+  /// Connection state, the last command's result, and the way into remapping.
+  ///
+  /// The result line matters more than it looks: a key press that the Mac
+  /// refuses must produce visible feedback, or the pad reads as broken rather
+  /// than as constrained.
+  private var header: some View {
+    HStack(spacing: 10) {
+      Text(statusLine)
+        .font(.footnote.weight(.medium))
+        .lineLimit(1)
+        .foregroundStyle(.white.opacity(0.7))
+      Spacer()
+      Button {
+        onRemap()
+      } label: {
+        Image(systemName: "slider.horizontal.3").font(.footnote)
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(.white.opacity(0.5))
+    }
+    .overlay(alignment: .bottomLeading) { connectionBanner.offset(y: 16) }
+  }
+
   @ViewBuilder
   private var connectionBanner: some View {
     if !surface.isConnected {

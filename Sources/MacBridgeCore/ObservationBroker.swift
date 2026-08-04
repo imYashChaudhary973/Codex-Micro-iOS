@@ -151,14 +151,23 @@ public actor DeviceObservationBroker {
   /// (a fixed-width sequence, an out-of-bound identifier) disables that
   /// device's view for the change without affecting any other.
   @discardableResult
-  public func recordThreadChange(threadID: String) async -> [UUID] {
+  ///
+  /// `thread` is the change's resulting state. Callers that have it should
+  /// pass it: the event carries it to the device, which is what keeps six
+  /// status keys correct between snapshots. Callers that do not have it pass
+  /// nothing and the device learns only that something moved.
+  public func recordThreadChange(
+    threadID: String,
+    thread: ObservedThreadState? = nil
+  ) async -> [UUID] {
     let projectID = attribution.projectID(forThreadID: threadID)
     var advanced: [UUID] = []
     for deviceID in subscriptions.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
       guard let scope = try? await refreshedScope(deviceID: deviceID) else { continue }
       guard var view = views[deviceID] else { continue }
       view.adopt(scope: scope)
-      let event = try? view.admit(threadID: threadID, projectID: projectID)
+      let event = try? view.admit(
+        threadID: threadID, projectID: projectID, thread: thread)
       views[deviceID] = view
       if event != nil {
         advanced.append(deviceID)

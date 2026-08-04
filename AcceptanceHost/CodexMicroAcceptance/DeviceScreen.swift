@@ -1,144 +1,192 @@
 import CompanionProtocol
 import SwiftUI
 
-/// Hosts the device surface.
+/// Hosts the device surface, driven by a real connection.
 ///
-/// **The feed is not connected yet.** Step 3.1 lands the surface and its state
-/// rules; Step 3.2 binds slots to threads and Step 3.1b brings up the
-/// authenticated session that supplies live observation. Until then the
-/// surface renders honestly from whatever it has been told, which is nothing —
-/// so every key is dark and the banner says the device is not connected.
-///
-/// That is the correct appearance for this state rather than a placeholder.
-/// The alternative, showing invented agents to demonstrate the layout, would
-/// violate the one invariant the surface exists to keep.
+/// Every control here now reaches the Mac. Before this the screen rendered
+/// correctly from state that never arrived and its handlers were empty
+/// closures: the pad looked right, resolved availability against capabilities
+/// it was never told, and did nothing when pressed.
 struct DeviceScreen: View {
-  @State private var surface: DeviceSurfaceState = .disconnected
-  @State private var bindings: AgentKeyBindings = .empty
-  @State private var threads: [ObservedThreadState] = []
-  @State private var lastUpdate: Date?
-  @State private var isConnected = false
-  @State private var selectedSlot: Int?
-  @State private var capabilities: Set<DeviceCapability> = []
-  @State private var reasoningEfforts: [String] = []
-  @State private var requestedEffort: String?
-  @State private var pendingApprovals: [SecureApprovalRequest] = []
+  @StateObject private var connection = DeviceConnection()
   @StateObject private var talk = PushToTalkRecogniser()
+
+  @State private var bindings: AgentKeyBindings = .empty
+  @State private var selectedSlot: Int?
+  @State private var requestedEffort: String?
+  @State private var layout: KeyLayout = .default
+  @State private var promptTarget: PromptTarget?
+  @State private var showingRemap = false
+
+  /// What a prompt sheet is for, so steer and send share one presenter.
+  private struct PromptTarget: Identifiable {
+    let threadID: String
+    let turnID: String?
+    var id: String { threadID + (turnID ?? "") }
+    var isSteer: Bool { turnID != nil }
+  }
 
   var body: some View {
     DeviceView(
       surface: surface,
-      capabilities: capabilities,
+      capabilities: connection.capabilities,
       dial: dialState,
       onSelect: { slot in
         selectedSlot = surface.selectedSlot == slot ? nil : slot
-        reproject()
       },
       onCommand: perform,
       onDial: { delta in
         if let next = dialState.stepped(by: delta) { requestedEffort = next }
       },
-      onWorkflow: { _ in
-        // Sending is wired with the rest of the command path; availability
-        // already governs whether the pad is reachable at all.
-      },
+      onWorkflow: run,
       approvals: approvalKeys,
-      onApproval: { _ in
-        // Sending rides the same command path as every other key; the state
-        // above already refuses to produce a command for anything unshown.
-      },
+      onApproval: resolve,
       talkState: talk.state,
       onTalkDown: { talk.start() },
       onTalkUp: {
         talk.stop()
-        // The transcript becomes an ordinary prompt. Nothing downstream can
-        // tell it was dictated, which is the point.
-        if talk.transcript != nil { talk.reset() }
-      }
+        if let transcript = talk.transcript, let threadID = surface.selectedKey?.threadID {
+          // A dictated prompt is an ordinary prompt. Nothing downstream can
+          // tell it was spoken, which is the point.
+          Task {
+            await connection.send(
+              .sendPrompt(threadID: threadID, prompt: transcript, attachmentIDs: []))
+          }
+        }
+        talk.reset()
+      },
+      statusLine: statusLine,
+      onRemap: { showingRemap = true }
     )
     .onAppear {
       bindings = AgentKeyBindingStore.load()
-      reproject()
+      layout = KeyLayoutStore.load()
     }
     .task {
-      // Availability is resolved before first use so the key can show itself
-      // as unavailable rather than failing under a thumb.
       await talk.prepare()
+      await connection.connect()
+    }
+    .onChange(of: connection.threads) { _, incoming in
+      // Fill empty keys as threads appear. Established bindings never move.
+      let filled = bindings.filling(from: incoming)
+      if filled != bindings {
+        bindings = filled
+        AgentKeyBindingStore.save(filled)
+      }
+    }
+    .sheet(item: $promptTarget) { target in
+      PromptSheet(
+        agentLabel: String(target.threadID.suffix(6)),
+        isSteer: target.isSteer,
+        onSend: { text in
+          let body: ClientCommandBody =
+            target.isSteer
+            ? .steerTurn(threadID: target.threadID, turnID: target.turnID ?? "", prompt: text)
+            : .sendPrompt(threadID: target.threadID, prompt: text, attachmentIDs: [])
+          promptTarget = nil
+          Task { await connection.send(body) }
+        },
+        onCancel: { promptTarget = nil }
+      )
+    }
+    .sheet(isPresented: $showingRemap) {
+      RemapSheet(
+        capabilities: connection.capabilities,
+        layout: $layout,
+        onDone: {
+          KeyLayoutStore.save(layout)
+          showingRemap = false
+        }
+      )
     }
   }
 
-  /// Applies a new authorized view: fill empty keys, keep every established
-  /// one, persist, and re-derive.
-  func apply(
-    threads incoming: [ObservedThreadState],
-    capabilities granted: Set<DeviceCapability>,
-    at instant: Date
-  ) {
-    threads = incoming
-    capabilities = granted
-    lastUpdate = instant
-    let filled = bindings.filling(from: incoming)
-    if filled != bindings {
-      bindings = filled
-      AgentKeyBindingStore.save(filled)
-    }
-    reproject()
-  }
+  // MARK: - Derived state
 
-  /// The dial, derived rather than stored, so it cannot drift from the
-  /// surface it describes.
-  private var dialState: ReasoningDialState {
-    ReasoningDialState.resolve(
-      positions: reasoningEfforts,
-      requested: requestedEffort,
-      surface: surface,
-      capabilities: capabilities
+  private var surface: DeviceSurfaceState {
+    DeviceSurfaceProjection().project(
+      bindings: bindings.slots,
+      threads: connection.threads,
+      lastUpdate: connection.lastUpdate,
+      now: Date(),
+      isConnected: connection.status == .connected,
+      selectedSlot: selectedSlot
     )
   }
 
-  /// The approval keys, derived so they cannot drift from what is displayed.
-  private var approvalKeys: ApprovalKeyState {
-    ApprovalKeyState.resolve(
-      pending: pendingApprovals, surface: surface, capabilities: capabilities)
+  private var dialState: ReasoningDialState {
+    ReasoningDialState.resolve(
+      positions: connection.reasoningEfforts,
+      requested: requestedEffort,
+      surface: surface,
+      capabilities: connection.capabilities
+    )
   }
 
-  /// Runs a command key.
-  ///
-  /// Navigation is local. The acting keys are wired in the next step; the
-  /// availability resolver already governs whether they are reachable, so
-  /// adding the command call does not change what is pressable.
+  private var approvalKeys: ApprovalKeyState {
+    ApprovalKeyState.resolve(
+      pending: [], surface: surface, capabilities: connection.capabilities)
+  }
+
+  /// One line describing the connection and the last command, so a press
+  /// always produces visible feedback even when the Mac refuses.
+  private var statusLine: String {
+    if let outcome = connection.lastOutcome { return outcome.message }
+    switch connection.status {
+    case .notPaired: return "Not paired"
+    case .connecting: return "Connecting…"
+    case .connected: return "Connected"
+    case .failed(let reason): return "Disconnected: \(reason)"
+    }
+  }
+
+  // MARK: - Actions
+
   private func perform(_ key: CommandKey) {
     switch key {
     case .previousAgent: moveSelection(by: -1)
     case .nextAgent: moveSelection(by: 1)
-    case .stop, .steer, .markRead: break
+    case .stop:
+      guard let thread = surface.selectedKey?.threadID,
+        let turn = activeTurnID(for: thread)
+      else { return }
+      Task { await connection.send(.interruptTurn(threadID: thread, turnID: turn)) }
+    case .markRead:
+      guard let thread = surface.selectedKey?.threadID else { return }
+      Task { await connection.send(.markThreadRead(threadID: thread, throughSequence: 0)) }
+    case .steer:
+      guard let thread = surface.selectedKey?.threadID,
+        let turn = activeTurnID(for: thread)
+      else { return }
+      promptTarget = PromptTarget(threadID: thread, turnID: turn)
     }
   }
 
-  /// Moves to the next bound key, skipping empty slots so navigation never
-  /// lands somewhere nothing can be done.
+  private func run(_ workflow: JoystickWorkflow) {
+    guard let thread = surface.selectedKey?.threadID else { return }
+    Task {
+      await connection.send(
+        .sendPrompt(threadID: thread, prompt: workflow.prompt, attachmentIDs: []))
+    }
+  }
+
+  private func resolve(_ decision: CompanionApprovalDecision) {
+    guard let body = approvalKeys.command(for: decision) else { return }
+    Task { await connection.send(body) }
+  }
+
+  /// The turn a thread is currently running, which stop and steer both need.
+  private func activeTurnID(for threadID: String) -> String? {
+    connection.threads.first { $0.threadID == threadID }?.activeTurnID
+  }
+
   private func moveSelection(by step: Int) {
     let bound = surface.agentKeys.filter(\.isBound).map(\.slot)
     guard !bound.isEmpty else { return }
     guard let current = surface.selectedSlot, let index = bound.firstIndex(of: current) else {
       selectedSlot = bound.first
-      reproject()
       return
     }
-    let next = (index + step + bound.count) % bound.count
-    selectedSlot = bound[next]
-    reproject()
-  }
-
-  /// Re-derives the surface from whatever is currently known.
-  private func reproject() {
-    surface = DeviceSurfaceProjection().project(
-      bindings: bindings.slots,
-      threads: threads,
-      lastUpdate: lastUpdate,
-      now: Date(),
-      isConnected: isConnected,
-      selectedSlot: selectedSlot
-    )
+    selectedSlot = bound[(index + step + bound.count) % bound.count]
   }
 }
