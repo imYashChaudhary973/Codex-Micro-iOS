@@ -130,3 +130,65 @@ final class RuntimeWireShapeTests: XCTestCase {
     await client.stop()
   }
 }
+
+/// Reasoning effort on the turn policy.
+///
+/// The field name and its placement come from the app-server's own generated
+/// schema, not from documentation: `TurnStartParams.effort` is described as
+/// "override the reasoning effort for this turn and subsequent turns", and
+/// `TurnSteerParams` has no effort field at all. Both facts shape what the
+/// device's dial can honestly claim to do.
+final class ReasoningEffortTests: XCTestCase {
+
+  func testAPermittedEffortIsSentAsTheEffortField() async throws {
+    let server = FakeCodexAppServer()
+    server.stubResult("turn/start", .object(["turn": .object(["id": .string("turn-1")])]))
+    let client = CodexAppServerClient(transport: server, timeout: .seconds(2))
+    _ = try await client.start()
+    let policy = PhoneTurnPolicy.resolve(
+      effectiveProfile: .runReadOnly, writableRoots: [],
+      requestedEffort: "high", permittedEfforts: ["low", "high"])
+
+    _ = try await LiveCodexRuntimeSession(client: client)
+      .startTurn(threadID: "thread-1", prompt: "go", policy: policy)
+
+    let params = try XCTUnwrap(server.requests("turn/start").first)["params"]
+    XCTAssertEqual(params["effort"].string, "high")
+    await client.stop()
+  }
+
+  /// A device cannot talk the host into a setting the host does not offer.
+  func testAnUnpermittedEffortIsDroppedRatherThanSubstituted() {
+    let policy = PhoneTurnPolicy.resolve(
+      effectiveProfile: .runReadOnly, writableRoots: [],
+      requestedEffort: "ludicrous", permittedEfforts: ["low", "high"])
+
+    XCTAssertNil(policy.reasoningEffort)
+  }
+
+  /// Substituting the nearest permitted value would mean the dial reads one
+  /// thing while the turn runs at another, with no way for the user to notice.
+  func testClampingDropsRatherThanChoosingANeighbour() {
+    XCTAssertNil(PhoneTurnPolicy.clampEffort("medium", permitted: ["low", "high"]))
+    XCTAssertNil(PhoneTurnPolicy.clampEffort("", permitted: [""]))
+    XCTAssertNil(PhoneTurnPolicy.clampEffort("high", permitted: []))
+    XCTAssertEqual(PhoneTurnPolicy.clampEffort("high", permitted: ["high"]), "high")
+  }
+
+  /// Omitted rather than null: sending null would be an explicit instruction
+  /// to clear the thread's setting rather than to leave it alone.
+  func testNoEffortOmitsTheFieldEntirely() async throws {
+    let server = FakeCodexAppServer()
+    server.stubResult("turn/start", .object(["turn": .object(["id": .string("turn-1")])]))
+    let client = CodexAppServerClient(transport: server, timeout: .seconds(2))
+    _ = try await client.start()
+    let policy = PhoneTurnPolicy.resolve(effectiveProfile: .runReadOnly, writableRoots: [])
+
+    _ = try await LiveCodexRuntimeSession(client: client)
+      .startTurn(threadID: "thread-1", prompt: "go", policy: policy)
+
+    let params = try XCTUnwrap(server.requests("turn/start").first)["params"]
+    XCTAssertEqual(params["effort"], .null, "an absent effort was sent as null")
+    await client.stop()
+  }
+}

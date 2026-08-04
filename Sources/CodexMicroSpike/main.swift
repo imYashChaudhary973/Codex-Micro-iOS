@@ -668,9 +668,15 @@ extension CodexMicroSpike {
 
     // The production policy, resolved exactly as the gateway resolves it for a
     // device whose effective profile permits workspace work.
+    // The reasoning effort the dial would request. The permitted set is what
+    // the host allows; passing the same value in both is what a Mac does when
+    // the model advertises it.
+    let requestedEffort = "high"
     let policy = PhoneTurnPolicy.resolve(
       effectiveProfile: .runWorkspace,
-      writableRoots: [root]
+      writableRoots: [root],
+      requestedEffort: requestedEffort,
+      permittedEfforts: [requestedEffort]
     )
     let session = LiveCodexRuntimeSession(client: client)
 
@@ -701,6 +707,7 @@ extension CodexMicroSpike {
     print("Codex Micro Phase 2 steer probe")
     print("  isolation: ephemeral thread, fresh temp root, network-disabled")
     print("  sandbox requested: \(policy.sandbox.rawValue)")
+    print("  reasoning effort: \(policy.reasoningEffort ?? "thread default")")
     print("  writable roots: \(policy.writableRoots.count)")
     print("  turn/start (workspaceWrite form): accepted, turn \(turnID)")
     if steerAccepted {

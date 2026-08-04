@@ -39,6 +39,16 @@ public struct PhoneTurnPolicy: Equatable, Sendable {
   /// phone.
   public let networkAccess: Bool
   public let approvalPolicy: Approval
+  /// Reasoning effort for this turn, or `nil` to leave the thread's default
+  /// alone.
+  ///
+  /// **This is an opaque string, not an enum, because the model decides what
+  /// is valid.** Codex advertises `supportedReasoningEfforts` per model and
+  /// describes the field as "a non-empty reasoning effort value advertised by
+  /// the model". A fixed enum here would be a guess that happens to work
+  /// until a model ships a different set, and would fail as an invalid
+  /// request rather than as an unsupported option.
+  public let reasoningEffort: String?
 
   /// Resolves the policy for an effective mobile action profile.
   ///
@@ -48,24 +58,48 @@ public struct PhoneTurnPolicy: Equatable, Sendable {
   ///   - writableRoots: The bridge-capped roots for the resolved project.
   ///     Empty means workspace-write is unavailable, and the result is
   ///     read-only.
+  ///   - requestedEffort: What the phone's dial asked for. The Mac clamps it
+  ///     against `permittedEfforts`; anything not on that list is dropped
+  ///     rather than substituted, so a device can never talk the host into a
+  ///     setting the host does not offer.
+  ///   - permittedEfforts: What this host will allow, normally the model's own
+  ///     advertised set. Empty means the dial has nothing to offer and the
+  ///     thread default stands.
   public static func resolve(
     effectiveProfile: MobileActionProfile,
-    writableRoots: [String]
+    writableRoots: [String],
+    requestedEffort: String? = nil,
+    permittedEfforts: Set<String> = []
   ) -> PhoneTurnPolicy {
+    let effort = clampEffort(requestedEffort, permitted: permittedEfforts)
     guard effectiveProfile == .runWorkspace, !writableRoots.isEmpty else {
       return PhoneTurnPolicy(
         sandbox: .readOnly,
         writableRoots: [],
         networkAccess: false,
-        approvalPolicy: .untrusted
+        approvalPolicy: .untrusted,
+        reasoningEffort: effort
       )
     }
     return PhoneTurnPolicy(
       sandbox: .workspaceWrite,
       writableRoots: writableRoots,
       networkAccess: false,
-      approvalPolicy: .untrusted
+      approvalPolicy: .untrusted,
+      reasoningEffort: effort
     )
+  }
+
+  /// Drops a requested effort the host does not permit.
+  ///
+  /// Dropping rather than substituting is deliberate. Silently swapping in the
+  /// nearest permitted value would mean the phone's dial reads one thing while
+  /// the turn runs at another, and the user would have no way to notice.
+  /// Dropping leaves the thread's own default, which is a setting the user
+  /// chose somewhere they can see.
+  static func clampEffort(_ requested: String?, permitted: Set<String>) -> String? {
+    guard let requested, !requested.isEmpty, permitted.contains(requested) else { return nil }
+    return requested
   }
 
   /// The `turn/start` parameter object for one thread and prompt.
@@ -80,7 +114,7 @@ public struct PhoneTurnPolicy: Equatable, Sendable {
     if sandbox == .workspaceWrite {
       sandboxPolicy["writableRoots"] = .array(writableRoots.map { .string($0) })
     }
-    return .object([
+    var parameters: [String: JSONValue] = [
       "threadId": .string(threadID),
       "input": .array([
         .object(["type": .string("text"), "text": .string(prompt)])
@@ -88,7 +122,16 @@ public struct PhoneTurnPolicy: Equatable, Sendable {
       "approvalPolicy": .string(approvalPolicy.rawValue),
       "sandboxPolicy": .object(sandboxPolicy),
       "summary": .string("none"),
-    ])
+    ]
+    // The field is `effort`, confirmed against the app-server's own generated
+    // schema rather than inferred: TurnStartParams describes it as "override
+    // the reasoning effort for this turn and subsequent turns". Omitted
+    // entirely when absent, because sending null would be an explicit
+    // instruction to clear the thread's setting rather than to leave it.
+    if let reasoningEffort {
+      parameters["effort"] = .string(reasoningEffort)
+    }
+    return .object(parameters)
   }
 }
 
