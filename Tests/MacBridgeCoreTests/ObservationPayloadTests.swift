@@ -6,7 +6,7 @@ import XCTest
 /// payload schemas that bind ``SecureObservationDelivery``'s opaque bytes.
 final class ObservationPayloadTests: XCTestCase {
   private static let snapshotJSON =
-    #"{"capabilities":[],"generatedAtEpochSeconds":1000,"threads":[{"activeTurnID":"turn-1","lastTurnID":"turn-1","lastTurnStatus":"inProgress","projectID":"project-a","status":"active","threadID":"thread-a"},{"projectID":"project-b","status":"idle","threadID":"thread-b"}]}"#
+    #"{"capabilities":[],"generatedAtEpochSeconds":1000,"reasoningEfforts":[],"threads":[{"activeTurnID":"turn-1","lastTurnID":"turn-1","lastTurnStatus":"inProgress","projectID":"project-a","status":"active","threadID":"thread-a"},{"projectID":"project-b","status":"idle","threadID":"thread-b"}]}"#
 
   private static let eventBatchJSON =
     #"{"events":[{"kind":"threadUpdated","projectID":"project-a","sequence":1,"threadID":"thread-a"},{"kind":"threadUpdated","projectID":"project-b","sequence":4,"threadID":"thread-b"}]}"#
@@ -189,7 +189,8 @@ final class ObservationPayloadTests: XCTestCase {
     // no command text, no path, no decision. The property this test defends —
     // that a device never learns what is pending approval from the
     // observation feed — is unchanged.
-    XCTAssertEqual(fields, ["generatedAtEpochSeconds", "threads", "capabilities"])
+    XCTAssertEqual(
+      fields, ["generatedAtEpochSeconds", "threads", "capabilities", "reasoningEfforts"])
     XCTAssertFalse(
       fields.contains { $0.localizedCaseInsensitiveContains("approval") },
       "the observation schema grew an approval field")

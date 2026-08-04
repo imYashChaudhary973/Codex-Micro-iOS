@@ -118,11 +118,20 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
   /// discloses nothing new: it is a statement about what the Mac would
   /// already refuse.
   public let capabilities: Set<DeviceCapability>
+  /// The reasoning-effort values this host will accept, in the order the
+  /// model advertises them.
+  ///
+  /// Ordered, not a set, because the dial has detents and their sequence is
+  /// the model's own — "low, medium, high" is not something the phone should
+  /// be inventing an order for. Empty means the dial has nothing to offer and
+  /// must show itself as unavailable rather than inventing positions.
+  public let reasoningEfforts: [String]
 
   public init(
     generatedAtEpochSeconds: UInt64,
     threads: [ObservedThreadState],
-    capabilities: Set<DeviceCapability> = []
+    capabilities: Set<DeviceCapability> = [],
+    reasoningEfforts: [String] = []
   ) throws {
     guard threads.count <= SecureObservationLimits.maxSnapshotThreadCount else {
       throw SecureWireValidationError.invalidField(name: "threads")
@@ -137,6 +146,7 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
     self.generatedAtEpochSeconds = generatedAtEpochSeconds
     self.threads = threads
     self.capabilities = capabilities
+    self.reasoningEfforts = reasoningEfforts
   }
 
   public init(from decoder: Decoder) throws {
@@ -147,7 +157,9 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
       // Absent means "no capabilities stated", not "all capabilities". A
       // device that cannot tell what it may do must assume it may do nothing.
       capabilities: try container.decodeIfPresent(
-        Set<DeviceCapability>.self, forKey: .capabilities) ?? []
+        Set<DeviceCapability>.self, forKey: .capabilities) ?? [],
+      reasoningEfforts: try container.decodeIfPresent(
+        [String].self, forKey: .reasoningEfforts) ?? []
     )
   }
 
@@ -155,6 +167,7 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
     case generatedAtEpochSeconds
     case threads
     case capabilities
+    case reasoningEfforts
   }
 }
 

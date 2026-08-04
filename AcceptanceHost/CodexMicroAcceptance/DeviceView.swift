@@ -12,8 +12,10 @@ import SwiftUI
 struct DeviceView: View {
   let surface: DeviceSurfaceState
   let capabilities: Set<DeviceCapability>
+  let dial: ReasoningDialState
   let onSelect: (Int) -> Void
   let onCommand: (CommandKey) -> Void
+  let onDial: (Int) -> Void
 
   var body: some View {
     VStack(spacing: 28) {
@@ -122,21 +124,67 @@ struct DeviceView: View {
 
   private var controls: some View {
     HStack(spacing: 32) {
-      dial
+      dialControl
       joystick
     }
     .foregroundStyle(.white.opacity(0.22))
   }
 
-  private var dial: some View {
+  /// The dial reads out its position **and when that position applies**. The
+  /// timing line is not a footnote: a control whose effect is deferred and
+  /// does not say so reads as broken.
+  private var dialControl: some View {
     VStack(spacing: 8) {
-      Circle()
-        .stroke(Color.white.opacity(0.12), lineWidth: 10)
-        .frame(width: 92, height: 92)
-        .overlay(Image(systemName: "dial.medium").font(.title2))
-      Text("Reasoning").font(.caption2)
+      ZStack {
+        Circle()
+          .stroke(
+            Color.white.opacity(dial.isAvailable ? 0.22 : 0.08),
+            lineWidth: 10
+          )
+          .frame(width: 92, height: 92)
+        VStack(spacing: 2) {
+          Text(dial.selected ?? "—")
+            .font(.callout.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+          Text("effort").font(.caption2).opacity(0.6)
+        }
+      }
+      .overlay(alignment: .top) {
+        stepButton(-1, "chevron.up").offset(y: -14)
+      }
+      .overlay(alignment: .bottom) {
+        stepButton(1, "chevron.down").offset(y: 14)
+      }
+      Text(dial.isAvailable ? dial.timingDescription : Self.describe(dial.unavailability))
+        .font(.caption2)
+        .multilineTextAlignment(.center)
+        .foregroundStyle(.white.opacity(0.35))
     }
     .frame(maxWidth: .infinity)
+    .foregroundStyle(.white.opacity(dial.isAvailable ? 0.9 : 0.25))
+  }
+
+  private func stepButton(_ delta: Int, _ symbol: String) -> some View {
+    Button {
+      onDial(delta)
+    } label: {
+      Image(systemName: symbol).font(.caption)
+    }
+    .buttonStyle(.plain)
+    // At the end of travel the button is dead, because a real dial stops.
+    .disabled(!dial.isAvailable || dial.stepped(by: delta) == nil)
+    .opacity(dial.stepped(by: delta) == nil ? 0.2 : 1)
+  }
+
+  static func describe(_ reason: ReasoningDialState.Unavailability?) -> String {
+    switch reason {
+    case .noPositionsOffered: return "No levels offered"
+    case .notPermitted: return "Not permitted"
+    case .noSelection: return "Select an agent"
+    case .notLive: return "Not connected"
+    case nil: return ""
+    }
   }
 
   private var joystick: some View {
