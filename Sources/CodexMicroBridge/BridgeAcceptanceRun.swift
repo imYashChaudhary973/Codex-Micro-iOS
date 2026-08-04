@@ -129,8 +129,8 @@ public enum BridgeAcceptanceRun {
         )
         _ = live.attribution.attribute(threadID: threadID, projectID: project.projectID)
         // Take it into the store, or no device will ever be told it exists.
-        await live.codexAssembly?.adoptThread(threadID)
-        report("serve.thread", "opened on Codex, adopted, and attributed")
+        let adopted = await live.codexAssembly?.adoptThread(threadID) ?? false
+        report("serve.thread", "opened=yes adopted=\(adopted)")
       } catch {
         report("serve.threadFailed", "\(error)")
       }

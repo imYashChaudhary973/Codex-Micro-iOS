@@ -270,8 +270,21 @@ public actor CodexBridgeAssembly {
   /// thread to name, and a press against the one it invents is answered
   /// `codexUnavailable`. This closes that gap using the same authoritative
   /// read the event path already uses for a thread the store does not know.
-  public func adoptThread(_ threadID: String) async {
-    await rebuildThread(threadID)
+  /// Returns whether the store actually took it. `rebuildThread` fails
+  /// silently by design — the next event retries — but a caller adopting a
+  /// thread it just created has no next event to wait for, so a silent failure
+  /// there is indistinguishable from success and leaves every device with an
+  /// empty world.
+  @discardableResult
+  public func adoptThread(_ threadID: String) async -> Bool {
+    guard let thread = try? await supervisor.readThread(threadID: threadID),
+      (try? await store.replaceThread(with: thread)) != nil
+    else {
+      return false
+    }
+    _ = try? await journal.append(.threadUpdated(threadID: threadID))
+    await emitStateChanged()
+    return true
   }
 
   /// Fetches the authoritative snapshot for a thread the store does not know
