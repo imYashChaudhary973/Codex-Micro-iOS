@@ -438,6 +438,15 @@ public enum SecureCommandDenialReason: String, Codable, CaseIterable, Sendable {
   case unsupportedCommand
   case attachmentsUnsupported
   case approvalsUnsupported
+  /// The approval could not be resolved: it is unknown, already answered,
+  /// expired, or changed since the device was shown it.
+  ///
+  /// Deliberately one reason for all four. The executor knows which, but that
+  /// knowledge describes the Mac's pending-approval registry — including
+  /// approvals this device may not be able to see — and telling a device
+  /// which of "already answered" and "never existed" applies is a probe into
+  /// state it was not granted.
+  case approvalNotResolvable
   case duplicateMismatch
 }
 
