@@ -1,4 +1,5 @@
 import CompanionProtocol
+import Crypto
 import Foundation
 import XCTest
 
@@ -143,5 +144,79 @@ final class ApprovalAuthorizationTests: XCTestCase {
       requestID: id, threadID: "thread-a", projectID: project, kind: .command,
       availableDecisions: [.approveOnce, .decline], requestDigest: digest,
       expiresAtEpochSeconds: expiresAt)
+  }
+}
+
+/// Widening a device's project scope.
+///
+/// Pairing grants an empty allowlist by design, and until this existed nothing
+/// could add to it — so a paired device could never be shown anything, which
+/// made the observation path unreachable in practice however well it worked in
+/// tests.
+final class WidenScopeTests: XCTestCase {
+
+  func testWideningAddsProjectsAndBumpsBothCounters() async throws {
+    let authority = DeviceGrantAuthority(
+      storage: WideningStore(), clock: { 1_000_000 })
+    let deviceID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000001")!
+    let initial = try await authority.addGrant(
+      deviceID: deviceID,
+      devicePublicKey: P256.Signing.PrivateKey().publicKey.x963Representation,
+      capabilities: [.view],
+      permittedProjectIDs: []
+    )
+
+    let widened = try await authority.widenScope(
+      deviceID: deviceID, permittedProjectIDs: ["project-a"])
+
+    XCTAssertEqual(widened.permittedProjectIDs, ["project-a"])
+    XCTAssertGreaterThan(widened.grantRevision, initial.grantRevision)
+    // The view epoch must move too: a device whose scope grew has to be forced
+    // onto a fresh filtered snapshot, or its sequence namespace would have
+    // gaps where the newly visible project's activity should be.
+    XCTAssertGreaterThan(widened.authorizedViewEpoch, initial.authorizedViewEpoch)
+  }
+
+  /// Conflating widening with reducing would let one call do both without
+  /// saying so.
+  func testWideningRefusesAnythingThatIsNotAStrictSuperset() async throws {
+    let authority = DeviceGrantAuthority(
+      storage: WideningStore(), clock: { 1_000_000 })
+    let deviceID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000002")!
+    _ = try await authority.addGrant(
+      deviceID: deviceID,
+      devicePublicKey: P256.Signing.PrivateKey().publicKey.x963Representation,
+      capabilities: [.view],
+      permittedProjectIDs: ["project-a", "project-b"]
+    )
+
+    for attempt in [["project-a"], ["project-a", "project-b"], ["project-c"]] {
+      do {
+        _ = try await authority.widenScope(
+          deviceID: deviceID, permittedProjectIDs: Set(attempt))
+        XCTFail("accepted \(attempt) as a widening")
+      } catch {
+        XCTAssertEqual(error as? DeviceGrantAuthorityError, .invalidGrant)
+      }
+    }
+  }
+}
+
+/// Minimal in-memory storage for the widening tests.
+private final class WideningStore: GrantAuthorityStorage, @unchecked Sendable {
+  private let lock = NSLock()
+  private var blob: Data? = Data()
+
+  func load() throws -> GrantAuthorityLoadResult {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let blob else { throw DeviceGrantAuthorityError.authorityMissing }
+    return blob.isEmpty ? .empty : .blob(blob)
+  }
+
+  func replace(blob: Data) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    self.blob = blob
   }
 }

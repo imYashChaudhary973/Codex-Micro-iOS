@@ -95,6 +95,7 @@ public enum BridgeAcceptanceRun {
           report("phrase.macConfirmed")
         }
       case .paired(let deviceID):
+        await grantWorkingScope(live, deviceID: deviceID)
         if let grant = try? await live.authority.authoritativeGrant(deviceID: deviceID) {
           report(
             "grant.stored",
@@ -107,6 +108,7 @@ public enum BridgeAcceptanceRun {
         report("grant.missing", "device paired but no grant was written")
         return false
       case .alreadyPaired(let deviceID):
+        await grantWorkingScope(live, deviceID: deviceID)
         report(
           "grant.alreadyPresent",
           "device is already paired; the existing grant was kept")
@@ -318,6 +320,50 @@ extension BridgeAcceptanceRun {
       report("preflight.tlsIdentity.ok", "spki=\(identity.spkiFingerprint.count) bytes")
     } catch {
       report("preflight.tlsIdentity.failed", "\(error)")
+    }
+  }
+}
+
+extension BridgeAcceptanceRun {
+  /// Gives the paired device the current project and the capabilities the pad
+  /// needs, so its keys can actually do something.
+  ///
+  /// Pairing deliberately grants `observe` with an empty allowlist (plan §2
+  /// invariant 4), which is right as a default and useless as an end state:
+  /// the device sees nothing and every key is refused. Production wants a Mac
+  /// UI for this; the acceptance run does it directly so the wiring can be
+  /// exercised end to end.
+  ///
+  /// `.approve` and `.startThread` are **not** granted. Both are gated on the
+  /// Mac supplying an executor that this composition deliberately does not,
+  /// so granting them would advertise a capability the bridge would then
+  /// refuse — the present-and-failing shape invariant 2 exists to prevent.
+  static func grantWorkingScope(_ live: BridgeLiveComposition, deviceID: UUID) async {
+    guard
+      let project = await live.registry.register(
+        rootPath: FileManager.default.currentDirectoryPath)
+    else {
+      report("grant.projectUnresolved")
+      return
+    }
+
+    // The gateway reads roots through this snapshot; refreshing it is what
+    // makes the newly registered project usable for workspace-write turns.
+    await live.workspaceRoots.update(projects: live.registry.allProjects())
+
+    do {
+      _ = try await live.authority.amendCapabilities(
+        deviceID: deviceID,
+        capabilities: [.view, .interrupt, .runAgent],
+        actionProfileCeiling: .runWorkspace
+      )
+      _ = try await live.authority.widenScope(
+        deviceID: deviceID, permittedProjectIDs: [project.projectID])
+      report(
+        "grant.widened",
+        "capabilities=view,interrupt,runAgent project=\(project.projectID.prefix(8))…")
+    } catch {
+      report("grant.widenFailed", "\(error)")
     }
   }
 }
