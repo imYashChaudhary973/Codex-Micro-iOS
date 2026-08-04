@@ -174,6 +174,16 @@ public actor CodexBridgeAssembly {
     try await journal.replay(after: cursor)
   }
 
+  /// The live runtime, for the network command gateway.
+  ///
+  /// Exposed because the gateway is the single path from a phone key to a
+  /// semantic mutation and it needs something that can actually reach Codex.
+  /// Handing it the supervisor rather than a new client is deliberate: the
+  /// supervisor already owns compatibility, restart, and degradation, so a
+  /// command is refused while Codex is unhealthy by the same logic that
+  /// refuses one on the Mac.
+  public nonisolated var runtime: CodexRuntimeSupervisor { supervisor }
+
   public func runtimeState() async -> CodexRuntimeState {
     await supervisor.state()
   }

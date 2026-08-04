@@ -39,12 +39,14 @@ public struct BridgeLiveComposition: Sendable {
   /// expect, so a wiped Keychain surfaces as a failure here instead of as a
   /// silently re-keyed bridge every paired phone would then reject.
   private init(
+    pumpForRetention: BridgeObservationPump?,
     assemblyForDiagnostics: BridgeNetworkAssembly,
     lanController: BridgeLANController,
     pairing: BridgePairingService,
     pairingModel: BridgePairingModel,
     authority: DeviceGrantAuthority
   ) {
+    self.pump = pumpForRetention
     self.assembly = assemblyForDiagnostics
     self.lanController = lanController
     self.pairing = pairing
@@ -52,8 +54,14 @@ public struct BridgeLiveComposition: Sendable {
     self.authority = authority
   }
 
+  /// The pump feeding the broker, retained so it keeps running.
+  public let pump: BridgeObservationPump?
+
   @MainActor
-  public static func make(codexProbe: BridgeCodexSupportProbe) throws -> BridgeLiveComposition {
+  public static func make(
+    codexProbe: BridgeCodexSupportProbe,
+    assembly codex: CodexBridgeAssembly? = nil
+  ) throws -> BridgeLiveComposition {
     // Resetting an identity is gated on "no grants exist". The live gate is
     // administration work that does not exist yet, so the safe answer is no:
     // an identity is never destroyed by this path.
@@ -84,9 +92,15 @@ public struct BridgeLiveComposition: Sendable {
     )
 
     let attribution = ThreadProjectTable()
+    // The snapshot source is the live assembly when there is one. Without it
+    // a device connects, subscribes, and is told about nothing — which is
+    // precisely how the keys stayed dark: the surface was correct and the
+    // feed behind it was a stub.
+    let snapshots: any ObservationSnapshotProviding =
+      codex.map(CodexAssemblySnapshotSource.init) ?? EmptyBridgeSnapshotSource()
     let broker = DeviceObservationBroker(
       scopes: authority,
-      snapshots: EmptyBridgeSnapshotSource(),
+      snapshots: snapshots,
       attribution: attribution,
       journalEpoch: try SystemJournalEpochMint().mintJournalEpoch()
     )
@@ -104,9 +118,14 @@ public struct BridgeLiveComposition: Sendable {
         attribution: attribution,
         ledger: InMemoryCommandLedger(),
         sessions: SessionCoordinatorVerifier(coordinator: sessions),
-        runtime: NeverReadyRuntime(),
-        responder: UnavailableCodexResponder(),
-        turnStarter: UnavailableTurnStarter(),
+        // The live supervisor, not a stub. It already owns compatibility,
+        // restart, and degradation, so a command is refused while Codex is
+        // unhealthy by the same logic that refuses one on the Mac. With the
+        // stub in place every state-changing command was denied
+        // runtimeUnavailable before it went anywhere.
+        runtime: codex?.runtime ?? NeverReadyRuntime(),
+        responder: codex?.runtime ?? UnavailableCodexResponder(),
+        turnStarter: codex?.runtime ?? UnavailableTurnStarter(),
         // New chat and approvals stay closed here. Both are opt-in by design
         // and neither default is a mistake: `startThread` honours the Step
         // 2.12 deferral's terms, and approvals stay shut until the Mac has a
@@ -114,7 +133,7 @@ public struct BridgeLiveComposition: Sendable {
         // which is exactly what those gates exist to require.
         threadStarter: DeniedThreadStarter(),
         approvals: nil,
-        turnSteerer: UnavailableTurnSteerer(),
+        turnSteerer: codex?.runtime ?? UnavailableTurnSteerer(),
         readCursors: try DeviceReadCursorStore(
           storage: FileBackedReadCursorStorage(),
           scopes: authority,
@@ -126,7 +145,27 @@ public struct BridgeLiveComposition: Sendable {
       pairingObserver: pairingObserver
     )
 
+    // Replays the journal and tells the broker which threads moved, resolving
+    // attribution first because the broker reads it synchronously and an
+    // unattributed thread is invisible.
+    let pump = codex.map { live in
+      BridgeObservationPump(
+        broker: broker,
+        attribution: BridgeThreadAttributionResolver(
+          registry: BridgeProjectRegistry(),
+          table: attribution,
+          readThread: { threadID in
+            // The assembly reads the thread from the running app-server; the
+            // resolver turns thread["cwd"] into a project the Mac allowlisted.
+            try await live.runtime.readThread(threadID: threadID)
+          }
+        ),
+        replay: { cursor in try await live.replay(after: cursor) }
+      )
+    }
+
     return BridgeLiveComposition(
+      pumpForRetention: pump,
       assemblyForDiagnostics: assembly,
       lanController: assembly.makeLANController(),
       pairing: BridgePairingService(
@@ -156,6 +195,18 @@ enum BridgeHostIdentifier {
     let id = UUID()
     UserDefaults.standard.set(id.uuidString, forKey: key)
     return id
+  }
+}
+
+/// Serves the device-facing snapshot from the live assembly.
+///
+/// The broker filters this per device; nothing here decides what anyone may
+/// see, it only supplies the unfiltered truth for the projection to cut down.
+struct CodexAssemblySnapshotSource: ObservationSnapshotProviding {
+  let assembly: CodexBridgeAssembly
+
+  func currentObservationSnapshot() async -> CompanionStateSnapshot {
+    await assembly.snapshot()
   }
 }
 

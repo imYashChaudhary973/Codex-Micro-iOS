@@ -38,7 +38,14 @@ public final class PushToTalkRecogniser: ObservableObject {
   @Published public private(set) var state: State = .idle
 
   private let recogniser = SFSpeechRecognizer(locale: Locale.current)
-  private let engine = AVAudioEngine()
+  /// The audio engine is not main-actor state and must not be treated as
+  /// such: `installTap` invokes its block on a real-time audio thread, and a
+  /// closure that inherits main-actor isolation from this class makes Swift's
+  /// executor check trap there. `nonisolated(unsafe)` says what is true — the
+  /// engine is used from the audio thread by design — and the tap is
+  /// installed by a `nonisolated` helper so the closure never captures actor
+  /// context at all.
+  private nonisolated(unsafe) let engine = AVAudioEngine()
   private var request: SFSpeechAudioBufferRecognitionRequest?
   private var task: SFSpeechRecognitionTask?
 
@@ -103,16 +110,7 @@ public final class PushToTalkRecogniser: ObservableObject {
     self.request = request
 
     do {
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-      try session.setActive(true, options: .notifyOthersOnDeactivation)
-      let input = engine.inputNode
-      input.installTap(onBus: 0, bufferSize: 1_024, format: input.outputFormat(forBus: 0)) {
-        buffer, _ in
-        request.append(buffer)
-      }
-      engine.prepare()
-      try engine.start()
+      try Self.startCapturing(engine: engine, into: request)
     } catch {
       state = .unavailable(.audioUnavailable)
       return
@@ -139,17 +137,54 @@ public final class PushToTalkRecogniser: ObservableObject {
     }
   }
 
+  /// Configures the session and installs the tap, off the main actor.
+  ///
+  /// The tap block runs on a real-time audio thread. Declaring it `@Sendable`
+  /// inside a `nonisolated` function is what stops it inheriting main-actor
+  /// isolation from the enclosing class — which is what crashed the app the
+  /// moment the talk key was held.
+  ///
+  /// `SFSpeechAudioBufferRecognitionRequest.append` is safe to call from that
+  /// thread; the isolation, not the API, was the problem.
+  private nonisolated static func startCapturing(
+    engine: AVAudioEngine,
+    into request: SFSpeechAudioBufferRecognitionRequest
+  ) throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+    try session.setActive(true, options: .notifyOthersOnDeactivation)
+    let input = engine.inputNode
+    let format = input.outputFormat(forBus: 0)
+    // A zero-channel format means no usable input route. Installing a tap on
+    // one throws deep inside AVFAudio; refusing here keeps the failure in the
+    // closed vocabulary.
+    guard format.channelCount > 0 else { throw Failure.noInputRoute }
+    input.installTap(onBus: 0, bufferSize: 1_024, format: format) {
+      @Sendable buffer, _ in
+      request.append(buffer)
+    }
+    engine.prepare()
+    try engine.start()
+  }
+
+  private enum Failure: Error { case noInputRoute }
+
   /// Stops listening and settles on a transcript. Called on key-up.
   public func stop() {
-    engine.inputNode.removeTap(onBus: 0)
-    engine.stop()
+    Self.stopCapturing(engine: engine)
     request?.endAudio()
     task?.finish()
-    try? AVAudioSession.sharedInstance().setActive(
-      false, options: .notifyOthersOnDeactivation)
     if case .listening(let partial) = state {
       state = partial.isEmpty ? .idle : .finished(partial)
     }
+  }
+
+  /// Tears the capture down, off the main actor for the same reason.
+  private nonisolated static func stopCapturing(engine: AVAudioEngine) {
+    engine.inputNode.removeTap(onBus: 0)
+    engine.stop()
+    try? AVAudioSession.sharedInstance().setActive(
+      false, options: .notifyOthersOnDeactivation)
   }
 
   /// Clears a finished transcript once it has been used or discarded.
