@@ -354,6 +354,12 @@ public struct GatewayCommandHandler: ListenerCommandHandling {
       command: command,
       context: NetworkCommandContext(deviceID: deviceID, sessionID: sessionID)
     )
+    // The Mac's own verdict, on the Mac's own output. A device that reports a
+    // command as "unknown" cannot say whether the Mac ran it, refused it, or
+    // never saw it — three states with three different fixes. The kind and the
+    // outcome are a closed vocabulary; no thread, path, or prompt is named.
+    FileHandle.standardError.write(
+      Data("codex-micro: command.\(command.body.kind.rawValue) — \(outcome)\n".utf8))
     return Self.transportOutcome(outcome)
   }
 

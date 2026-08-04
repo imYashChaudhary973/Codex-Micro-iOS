@@ -184,7 +184,12 @@ public final class DeviceConnection: ObservableObject {
     // presses against the thread the Mac actually reports rather than a
     // guess. If none arrives the press still happens — a denial for an
     // unknown thread is a real answer from the gateway, and proves the path.
-    for _ in 0..<20 where threads.isEmpty {
+    // Briefly, not indefinitely. Against an idle Codex no snapshot thread is
+    // ever coming, and every second spent waiting is a second the session can
+    // be torn down underneath the press — which turned a working path into an
+    // intermittent "notSent". The fallback thread is attributed on the Mac, so
+    // the press is answered on its merits either way.
+    for _ in 0..<4 where threads.isEmpty {
       try? await Task.sleep(for: .milliseconds(250))
     }
     let thread = threads.first
@@ -219,6 +224,10 @@ public final class DeviceConnection: ObservableObject {
       do {
         envelope = try await session.receive()
       } catch {
+        // Say why. A session that dies here takes the pad down with it, and
+        // without this the only symptom is a command reporting "notSent" long
+        // after the real failure, with nothing naming the cause.
+        report("read.failed", Self.describe(error))
         status = .failed(Self.describe(error))
         failAllWaiters()
         return
@@ -229,6 +238,7 @@ public final class DeviceConnection: ObservableObject {
       case .commandResult:
         route(result: envelope.payload)
       case .closeNotice:
+        report("read.closedByHost")
         status = .failed("closedByHost")
         failAllWaiters()
         return

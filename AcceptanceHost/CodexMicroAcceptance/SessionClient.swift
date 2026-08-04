@@ -145,8 +145,15 @@ public actor SessionClient {
 
   /// Receives and opens one application message.
   public func receive() async throws -> ListenerApplicationEnvelopeWire {
-    guard var open = session, let client else { throw Failure.notAuthenticated }
+    guard session != nil, let client else { throw Failure.notAuthenticated }
     let sealed = try await client.receiveRaw()
+    // **Re-read the session after the await, never before it.** Reading first
+    // and writing the whole value back afterwards silently discards whatever a
+    // `send` advanced while this call was suspended on the network — and an
+    // acknowledgement is sent from the read path itself, so the two overlap
+    // constantly. The lost counter surfaced as `counterViolation` on the very
+    // next frame, which reads as a broken session rather than as a race here.
+    guard var open = session else { throw Failure.notAuthenticated }
     let body: Data
     do {
       body = try open.inbound.open(sealed)
