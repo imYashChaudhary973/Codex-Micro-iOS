@@ -59,15 +59,37 @@ public final class PushToTalkRecogniser: ObservableObject {
       state = .unavailable(.onDeviceUnavailable)
       return
     }
-    let speech = await withCheckedContinuation { continuation in
-      SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
-    }
-    guard speech == .authorized else {
+    guard await Self.requestSpeechAuthorization() == .authorized else {
       state = .unavailable(.permissionDenied)
       return
     }
-    let microphone = await AVAudioApplication.requestRecordPermission()
+    let microphone = await Self.requestMicrophoneAccess()
     state = microphone ? .idle : .unavailable(.permissionDenied)
+  }
+
+  /// Asks TCC for speech authorization, off the main actor.
+  ///
+  /// **This must not be `@MainActor`.** `SFSpeechRecognizer.requestAuthorization`
+  /// invokes its callback on TCC's own XPC reply queue. Resuming a
+  /// continuation from there while the enclosing function is main-actor
+  /// isolated makes Swift's executor check fail the dispatch queue assertion,
+  /// which is a `SIGTRAP` — the app crashed on launch because `prepare()` runs
+  /// from `.task` and never got past this call.
+  ///
+  /// Isolating the bridge to `nonisolated` lets the callback resume on
+  /// whatever queue TCC chose, and the `await` at the call site hops back to
+  /// the main actor afterwards.
+  private nonisolated static func requestSpeechAuthorization() async
+    -> SFSpeechRecognizerAuthorizationStatus
+  {
+    await withCheckedContinuation { continuation in
+      SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+    }
+  }
+
+  /// Microphone access, off the main actor for the same reason.
+  private nonisolated static func requestMicrophoneAccess() async -> Bool {
+    await AVAudioApplication.requestRecordPermission()
   }
 
   /// Begins listening. Called on key-down.
