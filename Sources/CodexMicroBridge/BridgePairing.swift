@@ -144,11 +144,24 @@ public enum BridgePairingQR {
 public actor BridgePairingService {
   private let coordinator: PairingCoordinator
   private let model: BridgePairingModel
+  /// Where a completion discovered on *this* side goes.
+  ///
+  /// Pairing completes when the second of the two confirmations lands, and
+  /// either side can be second. The transport reports the case where the
+  /// device confirms last; this reports the case where the Mac user does.
+  /// Both must reach the same place or a pairing succeeds while the Mac
+  /// stores nothing — see ``confirmDisplayedPhrase()``.
+  private let observer: any ListenerPairingObserving
   private var activeSessionID: UUID?
 
-  public init(coordinator: PairingCoordinator, model: BridgePairingModel) {
+  public init(
+    coordinator: PairingCoordinator,
+    model: BridgePairingModel,
+    observer: any ListenerPairingObserving = DiscardingListenerPairingObserver()
+  ) {
     self.coordinator = coordinator
     self.model = model
+    self.observer = observer
   }
 
   /// Opens a pairing session against a bound endpoint and publishes its QR.
@@ -182,14 +195,27 @@ public actor BridgePairingService {
   /// The phrase comes from the displayed state rather than from the caller,
   /// so what gets confirmed is necessarily what was shown. A caller cannot
   /// confirm a phrase the user never saw.
+  /// **This call can complete the pairing.** `confirmVerificationPhrase`
+  /// returns `.completed` when the device already confirmed, which is the
+  /// ordinary case whenever the phone is quicker than the person at the Mac —
+  /// and over a real network it usually is. Discarding that result left the
+  /// screen on "waiting for the device" forever and stored no grant, while
+  /// both sides believed they had confirmed.
   public func confirmDisplayedPhrase() async {
     guard let (sessionID, phrase) = await currentPhrase() else { return }
+    let progress: PairingProgress
     do {
-      _ = try await coordinator.confirmVerificationPhrase(
+      progress = try await coordinator.confirmVerificationPhrase(
         pairingSessionID: sessionID, phrase: phrase)
-      await MainActor.run { model.set(.awaitingDevice(pairingSessionID: sessionID)) }
     } catch {
       await MainActor.run { model.set(.failed(reason: "phraseRejected")) }
+      return
+    }
+    switch progress {
+    case .completed(let proposal):
+      await observer.pairingCompleted(proposal)
+    case .awaitingConfirmation:
+      await MainActor.run { model.set(.awaitingDevice(pairingSessionID: sessionID)) }
     }
   }
 

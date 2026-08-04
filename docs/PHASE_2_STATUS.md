@@ -774,10 +774,33 @@ The client now sends them, and `PhoneUpgradeContractTests` states each constant 
 
 The re-run is **blocked on a locked device**: `SBMainWorkspace` refuses to launch an app while the iPhone is locked. That is correct behaviour rather than an obstacle — the device identity is `WhenUnlockedThisDeviceOnly`, so a locked phone could not sign a transcript anyway, which is the property acceptance case 7 exists to check.
 
+### A real iPhone paired with the Mac — and the race that had to be fixed first
+
+With the upgrade values corrected, the physical iPhone reached the Mac and both endpoints derived the **same six words** — `reeg gom teeb peep loz daf` — from transcripts each reconstructed independently. That is the property the phrase exists for, observed for the first time across two machines rather than two objects in one process.
+
+Then it stalled. The phone reported `confirm.sent`, the Mac confirmed the phrase, and the run timed out with no grant.
+
+**Pairing completes when the second of the two confirmations lands, and either side can be second.** `BridgePairingService.confirmDisplayedPhrase` discarded the `PairingProgress` that `confirmVerificationPhrase` returns, so the completion was only ever reported on the path where the *device* confirms last — the transport's `submitDeviceConfirmation`. When the phone confirmed first, the Mac's own confirmation returned `.completed(proposal)` and threw it away: the screen sat on "waiting for the device" forever, no grant was written, and both sides believed they had confirmed.
+
+Over a real network the phone is quicker than the person at the Mac essentially always, so **Mac-last is the ordinary case, not the exotic one**. It went unnoticed because every prior test drove the two confirmations in a fixed order with no latency between them.
+
+Both paths now converge on the same observer, and `PairingCompletionOrderingTests` drives the two orderings explicitly.
+
+### Full physical pairing run — PASS
+
+```text
+phone: phrase.device — pek meet dor hais leeb sor
+mac:   phrase.mac    — pek meet dor hais leeb sor
+mac:   grant.stored — capabilities=view projects=0 ceiling=observe
+mac:   PASS — a real device paired over Wi-Fi and the grant is stored
+```
+
+A physical iPhone 13, its own Secure Enclave key, real Wi-Fi, real TLS 1.3 against a pinned SPKI, the real WebSocket upgrade, the real pairing choreography, and a grant stored in the Mac's Data Protection Keychain. **Plan §7 gate 13 case 3 (pairing over Bonjour) is met except for discovery**: the device was given the endpoint rather than browsing for it, and the code was supplied at launch rather than scanned. Everything after that point is the production path.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
-- **No phone has completed pairing with the Mac.** The iPhone reached the Mac over real Wi-Fi and was refused at the WebSocket upgrade, which found a real defect in the phone client; the corrected build is installed but could not be launched because the device is locked. Device discovery over Bonjour, the camera scan, and the phone's own Enclave signature remain unproven in combination.
+- **Bonjour discovery by the device is unproven.** The iPhone paired over real Wi-Fi with its own Enclave key, but it was handed the endpoint rather than browsing for `_codexmicro._tcp`, and the pairing code was supplied at launch rather than scanned with the camera. The Mac's advertisement is confirmed published; nothing has confirmed a device can find it.
 - **No physical case has been run.** Every one of the eleven is outstanding. The host reports readiness only.
 - Nothing has bound a socket or published a Bonjour record. The assembly is proven by construction, not by a bind.
 - The Secure Enclave identity is still not bound to the pairing and session signer seams, and `DeviceGrantAuthority.addGrant` is still not called with a pairing proposal.
@@ -787,9 +810,9 @@ The re-run is **blocked on a locked device**: `SBMainWorkspace` refuses to launc
 ## Current verification evidence
 
 ```text
-Root swift test: 988 passed, 0 failed
+Root swift test: 990 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 99, CodexAppServerTests 18)
+   CodexMicroBridgeTests 101, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
@@ -807,9 +830,9 @@ Acceptance host, development-signed (-allowProvisioningUpdates): BUILD SUCCEEDED
     NSBonjourServices == [_codexmicro._tcp], usage description present
 App installed on a physical device: yes — iPhone 13, 00008110-00090C660EC0A01E,
   launched and its readiness output captured from the device console
-Physical acceptance cases run: none of the 11 in full. The Mac half of case 3
-  (pairing over Bonjour) passed against an in-process device over real Wi-Fi;
-  discovery and scanning by a real iPhone remain unproven
+Physical acceptance cases run: case 3 (pairing over Bonjour) passed with a real
+  iPhone 13 over real Wi-Fi, except device-side discovery and the camera scan.
+  The other 10 of 11 are untouched
 Real socket bound: yes — en0 (Wi-Fi), first time from this codebase
 Real Bonjour record published: yes — advertising=true from the provisioned bundle
 On-device readiness: 7 of 7 checkable preconditions satisfied, including Secure
