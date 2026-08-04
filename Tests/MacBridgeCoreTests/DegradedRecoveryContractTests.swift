@@ -351,7 +351,11 @@ private struct FailingRuntimeSession: CodexRuntimeSession {
 
   func stop() async {}
 
-  func readThread(threadID: String) async throws -> JSONValue {
+  func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String {
+    throw CodexRuntimeRequestError.notReady
+  }
+
+  func readThread(threadID: String, includeTurns: Bool) async throws -> JSONValue {
     throw CodexRuntimeRequestError.notReady
   }
 

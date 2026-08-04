@@ -170,7 +170,11 @@ public struct BridgeLiveComposition: Sendable {
         // 2.12 deferral's terms, and approvals stay shut until the Mac has a
         // reviewed way to surface them. Supplying either is a deliberate act,
         // which is exactly what those gates exist to require.
-        threadStarter: DeniedThreadStarter(),
+        // The New Chat key. Opening a conversation invokes no model and
+        // consumes no allowance, and the Mac still chooses the project and
+        // resolves the policy — the phone supplies neither. Left denied, the
+        // key rendered as available and did nothing when pressed.
+        threadStarter: codex?.runtime ?? DeniedThreadStarter(),
         approvals: nil,
         turnSteerer: codex?.runtime ?? UnavailableTurnSteerer(),
         // Without this the gateway resolves every project to no writable

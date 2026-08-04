@@ -627,7 +627,7 @@ extension BridgeAcceptanceRun {
     do {
       _ = try await live.authority.amendCapabilities(
         deviceID: deviceID,
-        capabilities: [.view, .interrupt, .runAgent],
+        capabilities: [.view, .interrupt, .runAgent, .startThread],
         actionProfileCeiling: .runWorkspace
       )
       // Widening demands a strict superset, which is right — a "widen" that

@@ -189,15 +189,21 @@ public final class DeviceConnection: ObservableObject {
     // be torn down underneath the press — which turned a working path into an
     // intermittent "notSent". The fallback thread is attributed on the Mac, so
     // the press is answered on its merits either way.
-    for _ in 0..<4 where threads.isEmpty {
+    for _ in 0..<16 where threads.isEmpty {
       try? await Task.sleep(for: .milliseconds(250))
     }
-    let thread = threads.first
-    report("probe.press", "interrupt thread=\(thread == nil ? "none" : "observed")")
+    // New Chat, not Stop. Stop is only meaningful against a running turn, so
+    // against an idle Codex it is answered "there is nothing to stop" — a real
+    // reply that proves the path and changes nothing. Opening a conversation
+    // is a real change to Codex's state and still invokes no model, so it
+    // proves the product without spending anything.
+    let project = threads.first?.projectID
+    report("probe.press", "startThread project=\(project == nil ? "none" : "observed")")
     let outcome = await send(
-      .interruptTurn(
-        threadID: thread?.threadID ?? "probe-thread",
-        turnID: thread?.activeTurnID ?? "probe-turn"))
+      // The prompt is required by the command's own validation and is
+      // discarded by the runtime, which only opens the conversation. No model
+      // sees it and no allowance is spent.
+      .startThread(projectID: project ?? "probe-project", prompt: "new chat", attachmentIDs: []))
     report("probe.outcome", "\(outcome)")
   }
 

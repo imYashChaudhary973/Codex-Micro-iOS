@@ -308,7 +308,11 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     continuation.finish()
   }
 
-  func readThread(threadID: String) async throws -> JSONValue {
+  func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String {
+    "thread-\(projectID)"
+  }
+
+  func readThread(threadID: String, includeTurns: Bool) async throws -> JSONValue {
     throw CodexRuntimeRequestError.notReady
   }
 
