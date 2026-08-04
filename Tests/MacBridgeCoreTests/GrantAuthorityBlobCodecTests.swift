@@ -1,3 +1,4 @@
+import CompanionProtocol
 import Foundation
 import XCTest
 

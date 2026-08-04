@@ -11,7 +11,9 @@ import SwiftUI
 /// replica even though it fits more on screen.
 struct DeviceView: View {
   let surface: DeviceSurfaceState
+  let capabilities: Set<DeviceCapability>
   let onSelect: (Int) -> Void
+  let onCommand: (CommandKey) -> Void
 
   var body: some View {
     VStack(spacing: 28) {
@@ -63,32 +65,57 @@ struct DeviceView: View {
 
   // MARK: - Command keys
 
-  /// Rendered inert for now. They light up in Step 3.3, when each is wired to
-  /// the command it already has a protocol for; showing them dark beforehand
-  /// is more honest than hiding them and then rearranging the layout.
+  /// Each key shows whether it can be pressed *before* it is pressed, and
+  /// says why not when it cannot. Availability comes from the same resolver
+  /// the action path uses, so the label and the behaviour cannot disagree.
   private var commandKeys: some View {
-    HStack(spacing: 12) {
-      commandKey("arrow.left", "Prev")
-      commandKey("arrow.right", "Next")
-      commandKey("stop.fill", "Stop")
-      commandKey("checkmark", "Accept")
+    HStack(spacing: 10) {
+      commandKey(.previousAgent, "chevron.left", "Prev")
+      commandKey(.nextAgent, "chevron.right", "Next")
+      commandKey(.stop, "stop.fill", "Stop")
+      commandKey(.steer, "arrow.triangle.turn.up.right.diamond", "Steer")
+      commandKey(.markRead, "envelope.open", "Read")
     }
   }
 
-  private func commandKey(_ symbol: String, _ title: String) -> some View {
-    VStack(spacing: 6) {
-      Image(systemName: symbol).font(.title3)
-      Text(title).font(.caption2)
+  private func commandKey(
+    _ key: CommandKey, _ symbol: String, _ title: String
+  ) -> some View {
+    let availability = key.availability(in: surface, capabilities: capabilities)
+    return Button {
+      onCommand(key)
+    } label: {
+      VStack(spacing: 5) {
+        Image(systemName: symbol).font(.body)
+        Text(title).font(.caption2)
+      }
+      .frame(maxWidth: .infinity)
+      .frame(height: 58)
+      .background(
+        RoundedRectangle(cornerRadius: 10)
+          .fill(Color.white.opacity(availability.isAvailable ? 0.10 : 0.04))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 10)
+          .stroke(Color.white.opacity(availability.isAvailable ? 0.22 : 0.07), lineWidth: 1)
+      )
+      .foregroundStyle(.white.opacity(availability.isAvailable ? 0.92 : 0.24))
     }
-    .frame(maxWidth: .infinity)
-    .frame(height: 58)
-    .background(
-      RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1)
-    )
-    .foregroundStyle(.white.opacity(0.25))
+    .buttonStyle(.plain)
+    .disabled(!availability.isAvailable)
+    .accessibilityLabel(Self.describe(key: title, availability: availability))
+  }
+
+  /// The reason is spoken, not just implied by dimming — a screen reader gets
+  /// nothing from opacity.
+  static func describe(key: String, availability: CommandKeyAvailability) -> String {
+    switch availability {
+    case .available: return key
+    case .notPermitted: return "\(key), not permitted for this device"
+    case .noSelection: return "\(key), select an agent first"
+    case .noRunningTurn: return "\(key), that agent is not running"
+    case .notLive: return "\(key), not connected"
+    }
   }
 
   // MARK: - Dial and joystick

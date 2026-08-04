@@ -1,3 +1,4 @@
+import CompanionProtocol
 import Foundation
 
 /// Closed availability state of the grant authority.

@@ -19,12 +19,18 @@ struct DeviceScreen: View {
   @State private var lastUpdate: Date?
   @State private var isConnected = false
   @State private var selectedSlot: Int?
+  @State private var capabilities: Set<DeviceCapability> = []
 
   var body: some View {
-    DeviceView(surface: surface) { slot in
-      selectedSlot = surface.selectedSlot == slot ? nil : slot
-      reproject()
-    }
+    DeviceView(
+      surface: surface,
+      capabilities: capabilities,
+      onSelect: { slot in
+        selectedSlot = surface.selectedSlot == slot ? nil : slot
+        reproject()
+      },
+      onCommand: perform
+    )
     .onAppear {
       bindings = AgentKeyBindingStore.load()
       reproject()
@@ -33,14 +39,47 @@ struct DeviceScreen: View {
 
   /// Applies a new authorized view: fill empty keys, keep every established
   /// one, persist, and re-derive.
-  func apply(threads incoming: [ObservedThreadState], at instant: Date) {
+  func apply(
+    threads incoming: [ObservedThreadState],
+    capabilities granted: Set<DeviceCapability>,
+    at instant: Date
+  ) {
     threads = incoming
+    capabilities = granted
     lastUpdate = instant
     let filled = bindings.filling(from: incoming)
     if filled != bindings {
       bindings = filled
       AgentKeyBindingStore.save(filled)
     }
+    reproject()
+  }
+
+  /// Runs a command key.
+  ///
+  /// Navigation is local. The acting keys are wired in the next step; the
+  /// availability resolver already governs whether they are reachable, so
+  /// adding the command call does not change what is pressable.
+  private func perform(_ key: CommandKey) {
+    switch key {
+    case .previousAgent: moveSelection(by: -1)
+    case .nextAgent: moveSelection(by: 1)
+    case .stop, .steer, .markRead: break
+    }
+  }
+
+  /// Moves to the next bound key, skipping empty slots so navigation never
+  /// lands somewhere nothing can be done.
+  private func moveSelection(by step: Int) {
+    let bound = surface.agentKeys.filter(\.isBound).map(\.slot)
+    guard !bound.isEmpty else { return }
+    guard let current = surface.selectedSlot, let index = bound.firstIndex(of: current) else {
+      selectedSlot = bound.first
+      reproject()
+      return
+    }
+    let next = (index + step + bound.count) % bound.count
+    selectedSlot = bound[next]
     reproject()
   }
 

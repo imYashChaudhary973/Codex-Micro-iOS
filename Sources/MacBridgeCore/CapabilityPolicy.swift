@@ -1,15 +1,6 @@
 import CompanionProtocol
 import Foundation
 
-public enum DeviceCapability: String, Codable, CaseIterable, Hashable, Sendable {
-  case view
-  case respond
-  case runAgent
-  case approve
-  case interrupt
-  case startThread
-}
-
 public enum MobileActionProfile: String, Codable, CaseIterable, Sendable {
   case observe
   case respond
