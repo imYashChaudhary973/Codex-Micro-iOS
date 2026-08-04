@@ -106,6 +106,12 @@ public enum BridgeAcceptanceRun {
         }
         report("grant.missing", "device paired but no grant was written")
         return false
+      case .alreadyPaired(let deviceID):
+        report(
+          "grant.alreadyPresent",
+          "device is already paired; the existing grant was kept")
+        report("PASS", "a real device completed pairing against grant \(deviceID.uuidString)")
+        return true
       case .failed(let reason):
         report("pairing.failed", reason)
         return false

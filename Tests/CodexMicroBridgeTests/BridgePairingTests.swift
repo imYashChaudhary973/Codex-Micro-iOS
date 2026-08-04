@@ -151,7 +151,9 @@ final class BridgePairingTests: XCTestCase {
     await observer.pairingCompleted(try await PairingRun.complete().proposal)
 
     let state = await MainActor.run { model.state }
-    XCTAssertEqual(state, .failed(reason: "grantNotStored"))
+    // The specific authority failure is carried through: "the write failed"
+    // and "the authority is unavailable" send the reader to different places.
+    XCTAssertEqual(state, .failed(reason: "grantNotStored.authorityUnavailable"))
   }
 
   // MARK: - The QR payload
@@ -488,4 +490,51 @@ private final class OrderedIdentityBackend: SecureIdentityBackend {
   }
   func deleteAllKeys(for role: BridgeIdentityRole) throws { keys[role] = [] }
   func withExclusiveCreation<T>(_ body: () throws -> T) rethrows -> T { try body() }
+}
+
+/// Re-pairing a device the Mac already holds.
+///
+/// The authority refuses a duplicate on purpose: replacing the grant would
+/// reset the grant revision and authorized-view epoch that the device's own
+/// session counters are bound to, turning a redundant action into a
+/// security-relevant one. But nothing went *wrong*, and reporting it as a bare
+/// failure sent the reader looking for a broken write.
+final class RepairedDeviceTests: XCTestCase {
+
+  func testRePairingAKnownDeviceReportsAlreadyPairedRatherThanFailure() async throws {
+    let authority = DeviceGrantAuthority(
+      storage: InMemoryGrantAuthorityStore(), clock: { 1_000_000 })
+    let model = await BridgePairingModel()
+    let observer = BridgePairingObserver(
+      model: model, recorder: PairingGrantRecorder(authority: authority))
+    let proposal = try await PairingRun.complete().proposal
+
+    await observer.pairingCompleted(proposal)
+    let first = await MainActor.run { model.state }
+    XCTAssertEqual(first, .paired(deviceID: proposal.deviceID))
+
+    await observer.pairingCompleted(proposal)
+    let second = await MainActor.run { model.state }
+    XCTAssertEqual(second, .alreadyPaired(deviceID: proposal.deviceID))
+  }
+
+  /// The existing grant must survive untouched. Its revision is what the
+  /// device's session counters are bound to.
+  func testRePairingLeavesTheExistingGrantUnchanged() async throws {
+    let authority = DeviceGrantAuthority(
+      storage: InMemoryGrantAuthorityStore(), clock: { 1_000_000 })
+    let model = await BridgePairingModel()
+    let observer = BridgePairingObserver(
+      model: model, recorder: PairingGrantRecorder(authority: authority))
+    let proposal = try await PairingRun.complete().proposal
+
+    await observer.pairingCompleted(proposal)
+    let before = try await authority.authoritativeGrant(deviceID: proposal.deviceID)
+    await observer.pairingCompleted(proposal)
+    let after = try await authority.authoritativeGrant(deviceID: proposal.deviceID)
+
+    XCTAssertEqual(before.grantRevision, after.grantRevision)
+    XCTAssertEqual(before.authorizedViewEpoch, after.authorizedViewEpoch)
+    XCTAssertEqual(before.devicePublicKey, after.devicePublicKey)
+  }
 }

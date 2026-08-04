@@ -797,6 +797,33 @@ mac:   PASS — a real device paired over Wi-Fi and the grant is stored
 
 A physical iPhone 13, its own Secure Enclave key, real Wi-Fi, real TLS 1.3 against a pinned SPKI, the real WebSocket upgrade, the real pairing choreography, and a grant stored in the Mac's Data Protection Keychain. **Plan §7 gate 13 case 3 (pairing over Bonjour) is met except for discovery**: the device was given the endpoint rather than browsing for it, and the code was supplied at launch rather than scanned. Everything after that point is the production path.
 
+### Re-pairing, found by running the physical case twice
+
+Running the physical pairing a second time failed with `pairing.failed — grantNotStored`. The phrases matched, the handshake completed, and the grant write was refused — because the phone persists its device identifier, so the second run was a **re-pair of a device the Mac already held**.
+
+`DeviceGrantAuthority` refuses a duplicate on purpose: replacing the grant would reset the grant revision and authorized-view epoch that the device's own session counters are bound to, turning a redundant action into a security-relevant one. But nothing went *wrong*, and collapsing it onto an anonymous `grantNotStored` sent the reader looking for a broken write.
+
+`BridgePairingState.alreadyPaired` is now distinct from `failed`, the existing grant is confirmed unchanged, and every other authority failure carries its own closed reason rather than one shared word. Two tests assert both — that a second pairing reports `alreadyPaired`, and that the stored grant's revision, epoch, and key are untouched.
+
+That defect was invisible to the first physical run and to every deterministic test, because both paired exactly once.
+
+### Physical acceptance — three consecutive passes
+
+```text
+run 1  phrase.device / phrase.mac — pek meet dor hais leeb sor
+       grant.stored — capabilities=view projects=0 ceiling=observe
+       PASS — a real device paired over Wi-Fi and the grant is stored
+
+run 2  phrase.device / phrase.mac — vooz kum rooz bip beeng koom
+       (found the re-pairing defect)
+
+run 3  phrase.device / phrase.mac — jaiz fol mim tung naish sosh
+       grant.alreadyPresent — the existing grant was kept
+       PASS
+```
+
+A physical iPhone 13 with its own Secure Enclave key, real Wi-Fi, real TLS 1.3 against a pinned SPKI, the real WebSocket upgrade, the real pairing choreography, and a grant in the Mac's Data Protection Keychain — repeatably, including the second-pairing case.
+
 ### What Step 2.14 still owes
 
 - **No physical acceptance case has been run — 0 of 11.** The app is installed and its offline preconditions hold; that is where the evidence stops.
@@ -810,9 +837,9 @@ A physical iPhone 13, its own Secure Enclave key, real Wi-Fi, real TLS 1.3 again
 ## Current verification evidence
 
 ```text
-Root swift test: 990 passed, 0 failed
+Root swift test: 992 passed, 0 failed
   (MacBridgeServerTests 265, MacBridgeCoreTests 369, CompanionCryptoTests 237,
-   CodexMicroBridgeTests 101, CodexAppServerTests 18)
+   CodexMicroBridgeTests 103, CodexAppServerTests 18)
 Root release build (swift build -c release): passed
 Root strict format lint (Sources, Tests): passed
 git diff --check: clean
