@@ -641,11 +641,17 @@ extension BridgeAcceptanceRun {
           "grant.alreadyScoped",
           "project=\(project.projectID.prefix(8))…")
       } else {
+        // **The union, not the new one alone.** Widening demands a strict
+        // superset, so passing only the project being added drops every
+        // project the device already had and is refused as `invalidGrant`.
+        // That made a second project unreachable: the first one worked because
+        // the grant started empty, and every one after it silently failed.
+        let widened = (existing?.permittedProjectIDs ?? []).union([project.projectID])
         _ = try await live.authority.widenScope(
-          deviceID: deviceID, permittedProjectIDs: [project.projectID])
+          deviceID: deviceID, permittedProjectIDs: widened)
         report(
           "grant.widened",
-          "capabilities=view,interrupt,runAgent project=\(project.projectID.prefix(8))…")
+          "projects=\(widened.count) added=\(project.projectID.prefix(8))…")
       }
     } catch {
       report("grant.widenFailed", "\(error)")
