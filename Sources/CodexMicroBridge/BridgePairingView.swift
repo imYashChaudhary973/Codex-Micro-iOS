@@ -31,6 +31,8 @@ struct BridgePairingView: View {
         waiting
       case .paired(let deviceID):
         paired(deviceID)
+      case .alreadyPaired:
+        alreadyPaired
       case .failed(let reason):
         failed(reason)
       }
@@ -106,6 +108,19 @@ struct BridgePairingView: View {
       // saying so here prevents the "it paired but shows nothing" report.
       Text("This device can observe nothing yet. Grant it a project to give it a view.")
         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      Button("Done", action: onCancel)
+    }
+  }
+
+  private var alreadyPaired: some View {
+    VStack(spacing: 12) {
+      Image(systemName: "checkmark.circle").font(.largeTitle).foregroundStyle(.secondary)
+      Text("Already paired").font(.headline)
+      Text(
+        "This device already has a grant, which was kept. Remove it first if you "
+          + "want to pair it again from scratch."
+      )
+      .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
       Button("Done", action: onCancel)
     }
   }

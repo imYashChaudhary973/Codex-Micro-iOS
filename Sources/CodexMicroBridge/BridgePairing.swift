@@ -16,6 +16,14 @@ public enum BridgePairingState: Equatable, Sendable {
   case idle
   /// A session exists and its QR is on screen. The bootstrap secret is live.
   case awaitingScan(qrText: String, expiresAtEpochSeconds: UInt64)
+  /// The device is already paired, and the existing grant was kept.
+  ///
+  /// Distinct from ``failed(reason:)`` because nothing went wrong. A device
+  /// that re-pairs without first being removed keeps the grant it has, and
+  /// silently replacing it would reset the grant revision and authorized-view
+  /// epoch that the device's own session counters are bound to — turning a
+  /// redundant action into a security-relevant one.
+  case alreadyPaired(deviceID: UUID)
   /// The device claimed. The user compares this phrase with the phone.
   ///
   /// The phrase itself is carried, not its rendered words. The confirm step
@@ -89,10 +97,22 @@ public struct BridgePairingObserver: ListenerPairingObserving {
   }
 
   public func pairingCompleted(_ proposal: PairedDeviceProposal) async {
+    let deviceID = proposal.deviceID
     do {
       _ = try await recorder.record(proposal)
-      let deviceID = proposal.deviceID
       await MainActor.run { model.set(.paired(deviceID: deviceID)) }
+    } catch DeviceGrantAuthorityError.duplicateDevice {
+      // Re-pairing a device the Mac already holds. The authority refuses on
+      // purpose and the existing grant stands; reporting this as a failure
+      // sent the reader looking for a broken write when the honest answer is
+      // "this device is already paired".
+      await MainActor.run { model.set(.alreadyPaired(deviceID: deviceID)) }
+    } catch DeviceGrantAuthorityError.deviceRevoked {
+      await MainActor.run { model.set(.failed(reason: "deviceRevoked")) }
+    } catch DeviceGrantAuthorityError.deviceExpired {
+      await MainActor.run { model.set(.failed(reason: "grantExpired")) }
+    } catch let failure as DeviceGrantAuthorityError {
+      await MainActor.run { model.set(.failed(reason: "grantNotStored.\(failure)")) }
     } catch {
       await MainActor.run { model.set(.failed(reason: "grantNotStored")) }
     }
