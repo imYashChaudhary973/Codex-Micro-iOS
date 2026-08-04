@@ -125,9 +125,20 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
             probe: SystemCodexCompatibilityProbe(
               codexExecutableURL: try CodexExecutableLocator.locate()),
             policy: .phase1
-          )
+          ),
+          // The live assembly, so the gateway reaches the real Codex and the
+          // broker has something to observe. Without it every state-changing
+          // command was denied runtimeUnavailable and every device saw an
+          // empty world.
+          assembly: assembly
         )
         model.attachLive(live)
+        // The pump turns journal changes into per-device events. Nothing
+        // reached the broker until this ran, so agent keys never lit.
+        if let pump = live.pump, let assembly {
+          await pump.start(updates: assembly.updates)
+          await pump.drain()
+        }
         record("startup.network.ready", level: .info)
         // The acceptance path runs only when the operator asks for it, and
         // exits when it is done so a run cannot be mistaken for a session.
