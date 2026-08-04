@@ -18,6 +18,15 @@ public struct AuthorizedViewScope: Equatable, Sendable {
   /// or one without `.view`, and then the permitted set is empty regardless
   /// of what the record stores.
   public let allowsObservation: Bool
+  /// What the device may do, told to it so its controls can show as
+  /// unavailable rather than failing when pressed (Phase 3 invariant 2).
+  ///
+  /// Empty for a device that may not observe, on the same fail-closed
+  /// reasoning as ``permittedProjectIDs``: a tombstoned grant reports no
+  /// capabilities regardless of what the record still stores, so a revoked
+  /// device is told it may do nothing rather than being told what it used to
+  /// be allowed.
+  public let capabilities: Set<DeviceCapability>
 
   /// Derives the scope from the authoritative record.
   public init(grant: AuthoritativeDeviceGrant) {
@@ -27,6 +36,7 @@ public struct AuthorizedViewScope: Equatable, Sendable {
     self.authorizedViewEpoch = grant.authorizedViewEpoch
     self.allowsObservation = allowsObservation
     self.permittedProjectIDs = allowsObservation ? grant.permittedProjectIDs : []
+    self.capabilities = allowsObservation ? grant.capabilities : []
   }
 
   /// Whether a resolved project is inside this device's current view. An
@@ -232,7 +242,8 @@ public enum AuthorizedSnapshotProjection {
     guard
       let filtered = try? SecureObservationSnapshot(
         generatedAtEpochSeconds: UInt64(max(0, snapshot.generatedAt.timeIntervalSince1970)),
-        threads: observed
+        threads: observed,
+        capabilities: scope.capabilities
       )
     else {
       throw ObservationProjectionError.projectionOversized

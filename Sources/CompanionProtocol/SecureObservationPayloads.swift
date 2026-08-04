@@ -105,8 +105,25 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
   /// `Date`-encoding strategy chosen at the call site.
   public let generatedAtEpochSeconds: UInt64
   public let threads: [ObservedThreadState]
+  /// What this device is permitted to do.
+  ///
+  /// Carried on the snapshot rather than announced separately because it
+  /// rides the machinery that already exists: an authorization change moves
+  /// the device's authorized-view epoch, which forces a fresh snapshot. So
+  /// the capability set and the threads it applies to always arrive together
+  /// and can never describe different moments.
+  ///
+  /// The device needs this to show an unavailable control as unavailable
+  /// rather than as one that fails when pressed (Phase 3 invariant 2). It
+  /// discloses nothing new: it is a statement about what the Mac would
+  /// already refuse.
+  public let capabilities: Set<DeviceCapability>
 
-  public init(generatedAtEpochSeconds: UInt64, threads: [ObservedThreadState]) throws {
+  public init(
+    generatedAtEpochSeconds: UInt64,
+    threads: [ObservedThreadState],
+    capabilities: Set<DeviceCapability> = []
+  ) throws {
     guard threads.count <= SecureObservationLimits.maxSnapshotThreadCount else {
       throw SecureWireValidationError.invalidField(name: "threads")
     }
@@ -119,19 +136,25 @@ public struct SecureObservationSnapshot: Codable, Equatable, Sendable {
     }
     self.generatedAtEpochSeconds = generatedAtEpochSeconds
     self.threads = threads
+    self.capabilities = capabilities
   }
 
   public init(from decoder: Decoder) throws {
     let container = try strictContainer(from: decoder, keyedBy: CodingKeys.self)
     try self.init(
       generatedAtEpochSeconds: container.decode(UInt64.self, forKey: .generatedAtEpochSeconds),
-      threads: container.decode([ObservedThreadState].self, forKey: .threads)
+      threads: container.decode([ObservedThreadState].self, forKey: .threads),
+      // Absent means "no capabilities stated", not "all capabilities". A
+      // device that cannot tell what it may do must assume it may do nothing.
+      capabilities: try container.decodeIfPresent(
+        Set<DeviceCapability>.self, forKey: .capabilities) ?? []
     )
   }
 
   private enum CodingKeys: String, CodingKey, CaseIterable {
     case generatedAtEpochSeconds
     case threads
+    case capabilities
   }
 }
 

@@ -1,3 +1,4 @@
+import CompanionProtocol
 import Foundation
 
 /// Versioned canonical blob codec for ``GrantAuthorityState`` (ADR §10/§11).
