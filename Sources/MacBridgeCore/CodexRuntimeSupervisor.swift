@@ -28,7 +28,7 @@ public protocol CodexRuntimeSession: Sendable {
 
   /// Reads one thread with its turns and returns the raw authoritative
   /// thread object, used to rebuild state after a restart.
-  func readThread(threadID: String) async throws -> JSONValue
+  func readThread(threadID: String, includeTurns: Bool) async throws -> JSONValue
 
   /// Sends an explicitly prepared response to a server-initiated request.
   func respondToServerRequest(id: Int64, result: JSONValue) async throws
@@ -76,12 +76,18 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
     await client.stop()
   }
 
-  public func readThread(threadID: String) async throws -> JSONValue {
+  public func readThread(threadID: String, includeTurns: Bool = true) async throws -> JSONValue {
     let response = try await client.request(
       method: "thread/read",
       params: .object([
         "threadId": .string(threadID),
-        "includeTurns": .bool(true),
+        // A thread that has had no user message is "not materialized" and
+        // refuses this outright, so a freshly opened one could never be read
+        // — and therefore never entered the store, never reached a snapshot,
+        // and never appeared on any device. Asking for turns is right when
+        // rebuilding a thread that has them and wrong when adopting one that
+        // does not, so the caller says which.
+        "includeTurns": .bool(includeTurns),
       ])
     )
     return response["thread"]
@@ -218,8 +224,8 @@ public actor CodexRuntimeSupervisor {
 
   /// Reads one authoritative thread through the active session. Fails closed
   /// when the runtime is not ready.
-  public func readThread(threadID: String) async throws -> JSONValue {
-    try await readySession().readThread(threadID: threadID)
+  public func readThread(threadID: String, includeTurns: Bool = true) async throws -> JSONValue {
+    try await readySession().readThread(threadID: threadID, includeTurns: includeTurns)
   }
 
   public func respondToServerRequest(id: Int64, result: JSONValue) async throws {

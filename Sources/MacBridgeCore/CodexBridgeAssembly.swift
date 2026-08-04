@@ -277,9 +277,19 @@ public actor CodexBridgeAssembly {
   /// empty world.
   @discardableResult
   public func adoptThread(_ threadID: String) async -> Bool {
-    guard let thread = try? await supervisor.readThread(threadID: threadID),
-      (try? await store.replaceThread(with: thread)) != nil
-    else {
+    let thread: JSONValue
+    do {
+      thread = try await supervisor.readThread(threadID: threadID, includeTurns: false)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: adopt.readFailed — \(error)\n".utf8))
+      return false
+    }
+    do {
+      try await store.replaceThread(with: thread)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: adopt.storeFailed — \(error)\n".utf8))
       return false
     }
     _ = try? await journal.append(.threadUpdated(threadID: threadID))
