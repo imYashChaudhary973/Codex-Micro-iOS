@@ -128,7 +128,9 @@ public enum BridgeAcceptanceRun {
           policy: PhoneTurnPolicy.resolve(effectiveProfile: .observe, writableRoots: [])
         )
         _ = live.attribution.attribute(threadID: threadID, projectID: project.projectID)
-        report("serve.thread", "opened on Codex and attributed")
+        // Take it into the store, or no device will ever be told it exists.
+        await live.codexAssembly?.adoptThread(threadID)
+        report("serve.thread", "opened on Codex, adopted, and attributed")
       } catch {
         report("serve.threadFailed", "\(error)")
       }

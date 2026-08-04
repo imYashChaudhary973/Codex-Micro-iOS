@@ -262,6 +262,18 @@ public actor CodexBridgeAssembly {
     }
   }
 
+  /// Takes a thread the bridge just opened into the store.
+  ///
+  /// `thread/start` returns an identifier and emits no event, so a thread
+  /// created through the runtime is real on Codex and invisible to the store —
+  /// and therefore absent from every device snapshot. A device then has no
+  /// thread to name, and a press against the one it invents is answered
+  /// `codexUnavailable`. This closes that gap using the same authoritative
+  /// read the event path already uses for a thread the store does not know.
+  public func adoptThread(_ threadID: String) async {
+    await rebuildThread(threadID)
+  }
+
   /// Fetches the authoritative snapshot for a thread the store does not know
   /// yet. On failure nothing is stored; the next event retries the same path.
   private func rebuildThread(_ threadID: String) async {

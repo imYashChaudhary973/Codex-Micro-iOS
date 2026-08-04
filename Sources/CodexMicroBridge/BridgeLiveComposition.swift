@@ -43,6 +43,7 @@ public struct BridgeLiveComposition: Sendable {
     hostPublicKeyX963: Data,
     attribution: ThreadProjectTable,
     runtime: CodexRuntimeSupervisor?,
+    codexAssembly: CodexBridgeAssembly?,
     registryForGrants: BridgeProjectRegistry,
     pumpForRetention: BridgeObservationPump?,
     assemblyForDiagnostics: BridgeNetworkAssembly,
@@ -55,6 +56,7 @@ public struct BridgeLiveComposition: Sendable {
     self.hostPublicKeyX963 = hostPublicKeyX963
     self.attribution = attribution
     self.runtime = runtime
+    self.codexAssembly = codexAssembly
     self.registry = registryForGrants
     self.pump = pumpForRetention
     self.assembly = assemblyForDiagnostics
@@ -78,6 +80,9 @@ public struct BridgeLiveComposition: Sendable {
   public let attribution: ThreadProjectTable
   /// The Codex runtime the gateway dispatches to, when there is one.
   public let runtime: CodexRuntimeSupervisor?
+  /// The Codex assembly, so a thread the bridge opens can be taken into the
+  /// store that feeds every device snapshot.
+  public let codexAssembly: CodexBridgeAssembly?
 
   @MainActor
   public static func make(
@@ -208,6 +213,7 @@ public struct BridgeLiveComposition: Sendable {
       hostPublicKeyX963: hostSigner.hostPublicKeyX963,
       attribution: attribution,
       runtime: codex?.runtime,
+      codexAssembly: codex,
       registryForGrants: registry,
       pumpForRetention: pump,
       assemblyForDiagnostics: assembly,
