@@ -125,8 +125,16 @@ public actor NetworkCommandGateway {
   /// the device's dedicated key answers that, and the deferral's own terms
   /// are kept: the Mac chooses the project and the sandbox, and the phone
   /// supplies only the prompt.
+  ///
+  /// `resolveApproval` is gated **four** times, more than anything else,
+  /// because it is the only command that authorises a real filesystem or
+  /// network action on the user's behalf: it must be on this list, the grant
+  /// must carry `.approve` (the pairing default does not), the Mac must have
+  /// supplied an approval executor — the default has none and refuses — and
+  /// the presented request digest must still match the pending request.
   public static let allowedCommandKinds: Set<CompanionCommandKind> = [
     .interruptTurn, .markThreadRead, .sendPrompt, .steerTurn, .startThread,
+    .resolveApproval,
   ]
 
   private let authority: DeviceGrantAuthority
@@ -137,6 +145,8 @@ public actor NetworkCommandGateway {
   private let responder: any CodexApprovalResponding
   private let turnStarter: any CodexTurnStarting
   private let threadStarter: any CodexThreadStarting
+  /// Supplied only by a Mac that has enabled approvals. Nil refuses.
+  private let approvals: ApprovalResolutionExecutor?
   private let turnSteerer: any CodexTurnSteering
   private let turnPolicies: TurnPolicyRegistry
   private let workspaceRoots: any WorkspaceRootResolving
@@ -152,6 +162,7 @@ public actor NetworkCommandGateway {
     responder: any CodexApprovalResponding,
     turnStarter: any CodexTurnStarting,
     threadStarter: any CodexThreadStarting = DeniedThreadStarter(),
+    approvals: ApprovalResolutionExecutor? = nil,
     turnSteerer: any CodexTurnSteering,
     turnPolicies: TurnPolicyRegistry = TurnPolicyRegistry(),
     workspaceRoots: any WorkspaceRootResolving = DeniedWorkspaceRootResolver(),
@@ -166,6 +177,7 @@ public actor NetworkCommandGateway {
     self.responder = responder
     self.turnStarter = turnStarter
     self.threadStarter = threadStarter
+    self.approvals = approvals
     self.turnSteerer = turnSteerer
     self.turnPolicies = turnPolicies
     self.workspaceRoots = workspaceRoots
@@ -238,7 +250,9 @@ public actor NetworkCommandGateway {
     }
 
     // 3. Allowlist, approvals, and attachments — before anything is claimed.
-    if let refusal = Self.refusalForClosedSurface(command.body) {
+    if let refusal = Self.refusalForClosedSurface(
+      command.body, approvalsEnabled: approvals != nil)
+    {
       return .denied(refusal)
     }
 
@@ -371,8 +385,10 @@ public actor NetworkCommandGateway {
     case .startThread(let projectID, let prompt, _):
       return await performStartThread(
         plan, projectID: projectID, prompt: prompt, now: now)
-    case .selectThread, .resolveApproval:
-      // Unreachable: the allowlist refused these before the claim existed.
+    case .resolveApproval:
+      return await performResolveApproval(plan, now: now)
+    case .selectThread:
+      // Unreachable: the allowlist refused this before the claim existed.
       return await finish(
         plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
         outcome: { _ in .denied(.unsupportedCommand) })
@@ -523,6 +539,52 @@ public actor NetworkCommandGateway {
       plan, state: .succeeded, resultCode: .completed, now: now, outcome: { .completed($0) })
   }
 
+  /// Resolves one approval through the dedicated executor.
+  ///
+  /// The gateway does not re-implement the resolution: `ApprovalResolutionExecutor`
+  /// already owns the ledger transitions, the digest check against the pending
+  /// registry, the single send, and the `serverRequest/resolved` reconciliation.
+  /// Duplicating any of that here would create a second place for the
+  /// exactly-once property to be got wrong.
+  ///
+  /// The executor's own outcomes map onto the gateway's, and the mapping keeps
+  /// the distinction that matters most: a response that was sent but never
+  /// confirmed is `outcomeUnknown`, never a failure. Reporting it as failed
+  /// would invite a retry that approves the same action twice.
+  private func performResolveApproval(
+    _ plan: ExecutionPlan,
+    now: Date
+  ) async -> NetworkCommandOutcome {
+    guard let approvals else {
+      // Unreachable: the closed-surface check refused before the claim.
+      return await finish(
+        plan, state: .declined, resultCode: .rejectedByPolicy, now: now,
+        outcome: { _ in .denied(.approvalsUnsupported) })
+    }
+
+    let outcome: ApprovalResolutionOutcome
+    do {
+      outcome = try await approvals.execute(
+        command: plan.command, deviceID: plan.deviceID, now: now)
+    } catch {
+      return .outcomeUnknown(await currentRecord(plan, now: now))
+    }
+
+    switch outcome {
+    case .confirmed(let record), .replayed(let record):
+      return .completed(record)
+    case .rejectedByPolicy(let record, _):
+      // The executor's own reason vocabulary describes the pending registry's
+      // state, which the device must not learn: it would report on approvals
+      // the device may not even be able to see. The closed wire reason says
+      // only that the request was refused.
+      _ = record
+      return .denied(.approvalNotResolvable)
+    case .sendFailed(let record), .outcomeUnknown(let record):
+      return .outcomeUnknown(record)
+    }
+  }
+
   private func performSendPrompt(
     _ plan: ExecutionPlan,
     threadID: String,
@@ -646,9 +708,13 @@ public actor NetworkCommandGateway {
   /// The surfaces that are closed for all of Phase 2, checked before any
   /// ledger claim exists so a rejected command leaves no trace.
   static func refusalForClosedSurface(
-    _ body: ClientCommandBody
+    _ body: ClientCommandBody,
+    approvalsEnabled: Bool
   ) -> SecureCommandDenialReason? {
-    if case .resolveApproval = body {
+    // Approvals stay closed unless the Mac supplied an executor. This is the
+    // opt-in gate, checked before any ledger claim exists so a refused
+    // approval leaves no trace — the same shape as every other closed surface.
+    if case .resolveApproval = body, !approvalsEnabled {
       return .approvalsUnsupported
     }
     if !attachmentIDs(of: body).isEmpty {

@@ -206,7 +206,10 @@ final class NetworkCommandGatewayTests: XCTestCase {
   func testTheAllowlistIsExactlyTheEnabledMutations() {
     XCTAssertEqual(
       NetworkCommandGateway.allowedCommandKinds,
-      [.interruptTurn, .markThreadRead, .sendPrompt, .steerTurn, .startThread]
+      [
+        .interruptTurn, .markThreadRead, .sendPrompt, .steerTurn, .startThread,
+        .resolveApproval,
+      ]
     )
   }
 
@@ -249,6 +252,26 @@ final class NetworkCommandGatewayTests: XCTestCase {
     }
     let starts = await optedOut.turnStarter.startCount
     XCTAssertEqual(starts, 0, "a turn ran without a thread")
+  }
+
+  /// Approvals are on the allowlist but stay closed unless the Mac supplied
+  /// an executor. The fixture supplies none, so a device holding every
+  /// capability is still refused — and refused *before* any ledger claim
+  /// exists, so a closed surface leaves no trace.
+  func testApprovalsStayClosedUntilTheMacSuppliesAnExecutor() async throws {
+    let world = try await World(
+      capabilities: Set(DeviceCapability.allCases), profile: .runWorkspace)
+    let command = try ClientCommand(
+      commandID: UUID(), issuedAt: World.now,
+      body: .resolveApproval(
+        requestID: "request-1", decision: .approveOnce,
+        requestDigest: String(repeating: "a", count: 64)))
+
+    let outcome = await world.gateway.execute(command: command, context: world.context)
+
+    XCTAssertEqual(outcome, .denied(.approvalsUnsupported))
+    let record = await world.ledger.record(commandID: command.commandID)
+    XCTAssertNil(record, "a refused approval left a ledger record")
   }
 
   /// Both agent commands are on the allowlist but gated a second time by the

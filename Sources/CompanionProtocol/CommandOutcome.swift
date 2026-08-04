@@ -61,6 +61,8 @@ extension CommandOutcome {
     case .unsupportedCommand: return "The Mac does not support that"
     case .attachmentsUnsupported: return "Attachments are not supported"
     case .approvalsUnsupported: return "Approvals are not enabled"
+    case .approvalNotResolvable:
+      return "That approval is no longer waiting — check the Mac"
     case .duplicateMismatch: return "That command was already sent differently"
     }
   }
