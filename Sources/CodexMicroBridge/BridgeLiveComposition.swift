@@ -92,6 +92,8 @@ public struct BridgeLiveComposition: Sendable {
     )
 
     let pairingModel = BridgePairingModel()
+    let pairingObserver = BridgePairingObserver(
+      model: pairingModel, recorder: PairingGrantRecorder(authority: authority))
     let assembly = BridgeNetworkAssembly(
       authority: authority,
       sessions: sessions,
@@ -114,17 +116,14 @@ public struct BridgeLiveComposition: Sendable {
       ),
       tls: BridgeSecureEnclaveTLSProvider(makeStore: makeIdentityStore),
       codexProbe: codexProbe,
-      pairingObserver: BridgePairingObserver(
-        model: pairingModel,
-        recorder: PairingGrantRecorder(authority: authority)
-      )
+      pairingObserver: pairingObserver
     )
 
     return BridgeLiveComposition(
       assemblyForDiagnostics: assembly,
       lanController: assembly.makeLANController(),
       pairing: BridgePairingService(
-        coordinator: pairingCoordinator, model: pairingModel),
+        coordinator: pairingCoordinator, model: pairingModel, observer: pairingObserver),
       pairingModel: pairingModel,
       authority: authority
     )

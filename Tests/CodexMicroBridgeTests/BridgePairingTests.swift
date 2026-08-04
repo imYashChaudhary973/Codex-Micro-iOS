@@ -341,3 +341,151 @@ final class PhoneUpgradeContractTests: XCTestCase {
     XCTAssertEqual(ListenerUpgradePolicy.subprotocol, "codex-micro.bridge.v1")
   }
 }
+
+/// Which side confirms last decides where the completion surfaces.
+///
+/// Pairing completes when the second of the two confirmations lands, and
+/// either side can be second. The transport reports the device-last case;
+/// `BridgePairingService` reports the Mac-last case. Both must reach the same
+/// place, or a pairing "succeeds" on both screens while the Mac stores
+/// nothing and the device is refused as unknown on its next connection.
+///
+/// Over a real network the phone is usually quicker than the person at the
+/// Mac, so Mac-last is the ordinary case rather than the exotic one — which is
+/// why this went unnoticed until a real device was on the other end.
+final class PairingCompletionOrderingTests: XCTestCase {
+
+  func testTheMacConfirmingLastStillRecordsTheGrant() async throws {
+    let world = try await OrderedPairingWorld.make()
+
+    // Device confirms first, so the Mac's confirmation is the one that
+    // completes the pairing.
+    _ = try await world.coordinator.submitDeviceConfirmation(world.deviceConfirmation)
+    await world.service.confirmDisplayedPhrase()
+
+    let stored = try await world.authority.authoritativeGrant(deviceID: world.deviceID)
+    XCTAssertEqual(stored.capabilities, [.view])
+    let state = await MainActor.run { world.model.state }
+    XCTAssertEqual(state, .paired(deviceID: world.deviceID))
+  }
+
+  func testTheDeviceConfirmingLastStillRecordsTheGrant() async throws {
+    let world = try await OrderedPairingWorld.make()
+
+    // Mac confirms first; the device's confirmation completes the pairing and
+    // the transport observer records it.
+    await world.service.confirmDisplayedPhrase()
+    let progress = try await world.coordinator.submitDeviceConfirmation(
+      world.deviceConfirmation)
+    guard case .completed(let proposal) = progress else {
+      XCTFail("the device's confirmation did not complete the pairing")
+      return
+    }
+    await world.observer.pairingCompleted(proposal)
+
+    let stored = try await world.authority.authoritativeGrant(deviceID: world.deviceID)
+    XCTAssertEqual(stored.capabilities, [.view])
+  }
+}
+
+/// A claimed pairing session with the device's confirmation ready to submit,
+/// so a test controls which side confirms last.
+private struct OrderedPairingWorld {
+  let coordinator: PairingCoordinator
+  let service: BridgePairingService
+  let observer: BridgePairingObserver
+  let model: BridgePairingModel
+  let authority: DeviceGrantAuthority
+  let deviceID: UUID
+  let deviceConfirmation: SecurePairingConfirmation
+
+  static func make() async throws -> OrderedPairingWorld {
+    let store = BridgeIdentityStore(backend: OrderedIdentityBackend(), resetPolicy: { false })
+    let signer = try EnclaveHostStatementSigner(identity: try store.create(role: .host))
+    let coordinator = try PairingCoordinator(
+      hostID: UUID(uuidString: "F0F0F0F0-F0F0-F0F0-F0F0-F0F0F0F0F0F0")!,
+      hostPublicKeyX963: signer.hostPublicKeyX963,
+      signer: signer
+    )
+    let authority = DeviceGrantAuthority(
+      storage: InMemoryGrantAuthorityStore(), clock: { 1_000_000 })
+    let model = await BridgePairingModel()
+    let observer = BridgePairingObserver(
+      model: model, recorder: PairingGrantRecorder(authority: authority))
+    let service = BridgePairingService(
+      coordinator: coordinator, model: model, observer: observer)
+
+    let payload = try await coordinator.createSession(
+      endpointOrigin: try PairingEndpointOrigin("wss://192.168.1.5:8443"),
+      selection: try SecureProtocolSelection(major: 1, minor: 1, features: [.observeSync]),
+      tlsSPKIFingerprint: Data(repeating: 0x31, count: 32)
+    )
+    let deviceKey = P256.Signing.PrivateKey()
+    let deviceID = UUID(uuidString: "F1F1F1F1-F1F1-F1F1-F1F1-F1F1F1F1F1F1")!
+    let device = PairingDeviceEndpoint(
+      identity: try PairingDeviceIdentity(
+        deviceID: deviceID,
+        publicKeyX963: deviceKey.publicKey.x963Representation,
+        signer: OrderedTranscriptSigner(key: deviceKey)
+      ))
+    let attempt = try device.beginPairing(with: payload)
+    let acceptance = try await coordinator.claim(request: attempt.request)
+    let verification = try attempt.verifyHostResponse(acceptance.response)
+
+    // Put the phrase on screen exactly as the transport would, so the service
+    // confirms the value the user is looking at.
+    await observer.pairingClaimed(
+      pairingSessionID: payload.pairingSessionID, phrase: acceptance.verificationPhrase)
+
+    return OrderedPairingWorld(
+      coordinator: coordinator,
+      service: service,
+      observer: observer,
+      model: model,
+      authority: authority,
+      deviceID: deviceID,
+      deviceConfirmation: try verification.confirmLocally(
+        matching: verification.verificationPhrase)
+    )
+  }
+}
+
+private struct OrderedTranscriptSigner: PairingTranscriptSigner {
+  let key: P256.Signing.PrivateKey
+  func signPairingTranscript(_ canonicalBytes: Data) throws -> Data {
+    try key.signature(for: canonicalBytes).rawRepresentation
+  }
+}
+
+private final class OrderedIdentityBackend: SecureIdentityBackend {
+  private final class Key: SecureIdentityKey {
+    let key = P256.Signing.PrivateKey()
+    func publicKeyX963() throws -> Data { key.publicKey.x963Representation }
+    func signRaw(_ message: Data) throws -> Data {
+      try key.signature(for: message).rawRepresentation
+    }
+    func validateRequiredAttributes() throws {}
+    func assertNonExportable() throws {}
+    func certificateSigner() throws -> Certificate.PrivateKey { Certificate.PrivateKey(key) }
+  }
+  private var claims: Set<BridgeIdentityRole> = []
+  private var keys: [BridgeIdentityRole: [Key]] = [:]
+  func insertClaim(for role: BridgeIdentityRole) throws -> BridgeClaimInsertion {
+    claims.insert(role).inserted ? .inserted : .alreadyPresent
+  }
+  func claimCount(for role: BridgeIdentityRole) throws -> Int { claims.contains(role) ? 1 : 0 }
+  func removeClaim(for role: BridgeIdentityRole) throws { claims.remove(role) }
+  func createKey(for role: BridgeIdentityRole) throws -> any SecureIdentityKey {
+    let key = Key()
+    keys[role, default: []].append(key)
+    return key
+  }
+  func existingKeys(for role: BridgeIdentityRole) throws -> [any SecureIdentityKey] {
+    keys[role] ?? []
+  }
+  func deleteKey(_ key: any SecureIdentityKey, for role: BridgeIdentityRole) throws {
+    keys[role] = (keys[role] ?? []).filter { $0 !== (key as? Key) }
+  }
+  func deleteAllKeys(for role: BridgeIdentityRole) throws { keys[role] = [] }
+  func withExclusiveCreation<T>(_ body: () throws -> T) rethrows -> T { try body() }
+}
