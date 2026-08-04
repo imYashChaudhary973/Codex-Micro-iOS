@@ -20,6 +20,8 @@ struct CodexMicroAcceptanceApp: App {
   var body: some Scene {
     WindowGroup {
       TabView {
+        DeviceScreen()
+          .tabItem { Label("Device", systemImage: "square.grid.3x2.fill") }
         PairingScreen(model: pairing, flow: PhonePairingFlow(model: pairing))
           .tabItem { Label("Pair", systemImage: "qrcode") }
         AcceptanceView()

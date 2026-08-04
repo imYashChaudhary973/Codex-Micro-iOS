@@ -943,3 +943,14 @@ The counts above supersede the Step 2.7 block, which transposed the `MacBridgeCo
 - Remaining ADR §16 obligations after this step: production Bonjour and the `NWListener.service` physical re-verification (2.13), and the physical signed-iPhone matrix (2.14). The spike's rate-limiting, slow-consumer, idle-expiry, ping/pong, live-`NWInterface`-pinning, app-level connection-cap, and registry-based-teardown gaps are closed here; the lifecycle-generation integration gap was closed by Step 2.6.
 - Phone approval execution or approval assertion types — rejected throughout Phase 2; Phase 4 scope.
 - Physical-device claims — only at the post-provisional Phase 2 acceptance gate (Step 2.14).
+
+
+## Phase 3 — Step 3.1: the device surface
+
+`AgentKeyState` and `DeviceSurfaceProjection` derive what the six agent keys show from the observation payloads the Mac already sends, and `DeviceView` renders the 13-key layout.
+
+**Activity and freshness are separate types on purpose.** Invariant 1 says a key never lies about state, and the way a status display lies is by continuing to show its last value after it stopped being told anything. Folding "the agent is running" and "we last heard thirty seconds ago" into one enum makes that failure unrepresentable in the type and inevitable in the code. Kept apart, a stale key shows what it last knew *and* that it is no longer sure — which is what the hardware's own LED does when the host disconnects.
+
+Fifteen tests, most of them about the ways a status display lies rather than the happy path: a thread that is `active` while its turn already finished must not pulse; an error beats any earlier completed turn; an in-flight turn that has failed must not pulse; "in progress with no active turn" is a contradiction and reads `unknown` rather than picking a side; a slot bound to a thread the device can no longer see stays bound and reads unknown, because silently emptying it would hide a revocation behind what looks like an unused key.
+
+**The live feed is not connected.** The surface renders honestly from what it has been told, which is nothing, so every key is dark and the banner says the device is not connected. That is the correct appearance for this state rather than a placeholder — showing invented agents to demonstrate the layout would violate the one invariant the surface exists to keep. The authenticated session client that supplies observation is the next step.
