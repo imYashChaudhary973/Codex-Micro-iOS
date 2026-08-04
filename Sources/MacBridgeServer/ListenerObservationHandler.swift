@@ -206,10 +206,13 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
     do {
       switch envelope.kind {
       case .observationSubscribe:
-        guard
-          let message = try? JSONDecoder().decode(
+        let message: SecureObservationSubscribe
+        do {
+          message = try JSONDecoder().decode(
             SecureObservationSubscribe.self, from: envelope.payload)
-        else {
+        } catch {
+          FileHandle.standardError.write(
+            Data("codex-micro: subscribe.undecodable — \(error)\n".utf8))
           return .close(.protocolViolation)
         }
         let first = try await observation.subscribe(
@@ -254,8 +257,12 @@ public final class ListenerObservationHandler: ChannelInboundHandler, @unchecked
         return .close(.protocolViolation)
       }
     } catch let refusal as ListenerObservationRefusal {
+      FileHandle.standardError.write(
+        Data("codex-micro: observation.refused — \(refusal)\n".utf8))
       return .close(refusal.closeReason)
     } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: observation.failed — \(type(of: error)):\(error)\n".utf8))
       return .close(.protocolViolation)
     }
   }

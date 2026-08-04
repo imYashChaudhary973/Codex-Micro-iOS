@@ -103,6 +103,15 @@ public actor SessionClient {
         ListenerHandshakeEnvelopeWire(
           kind: .sessionAuthConfirmation,
           payload: try JSONEncoder().encode(completion.confirmation)))
+      // **The host promotes asynchronously and sends nothing back.** Message 3
+      // is the last word in the handshake, so a client that writes its first
+      // application frame immediately can beat the promotion to the gate,
+      // which then reads a sealed frame as pre-authentication traffic and
+      // refuses it with the collapsed `authenticationFailed`. That is the
+      // whole failure: the session was valid, the frame was valid, and it
+      // simply arrived one step early. The in-process device only ever passed
+      // because it happened to pause here.
+      try? await Task.sleep(for: .milliseconds(400))
       session = completion.session
     } catch let reason as SessionClosedReason {
       client.close()
@@ -168,7 +177,11 @@ public actor SessionClient {
       if let notice = try? ListenerHandshakeEnvelopeWire.decode(sealed),
         notice.kind == .closeNotice
       {
-        throw Failure.sessionClosed(.protocolViolation)
+        // Report the reason the host actually gave. Substituting a fixed one
+        // here repeats the exact mistake this block was added to fix: it
+        // turns the host's answer into the client's guess.
+        let reason = String(decoding: notice.payload, as: UTF8.self)
+        throw Failure.authenticationRejected("closedByHost:\(reason)")
       }
       throw Failure.authenticationRejected("open:\(type(of: error)):\(error)")
     }
