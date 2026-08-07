@@ -1,10 +1,10 @@
 # Codex Micro — Device Parity Specification
 
-**Status:** Specification. Nothing in this document is implemented as UI yet.
+**Status:** Product definition. Pad UI and controls are largely **built**; physical parity acceptance is **not** complete. See [STATUS.md](STATUS.md) and [PHASE_3_PLAN.md](PHASE_3_PLAN.md).
 
 **Purpose:** This project replicates **OpenAI's Codex Micro** — a physical macropad, released 15 July 2026, built with Work Louder, priced at $230 and currently sold out — as an iPhone app that controls Codex on a paired Mac. The phone is meant to *be* the device: the same controls, the same feedback, the same effect on Codex.
 
-Everything built in Phases 0–2 is the plumbing that makes this possible. It is not the product. This document is the product specification, and it exists because that distinction was implicit until now and cost a full phase of framing.
+Phases 0–2 are the secure plumbing. Phase 3 is the device surface. This document is the product specification.
 
 ---
 
@@ -43,42 +43,26 @@ The transport half is complete and physically proven. A real iPhone 13 pairs wit
 
 ---
 
-## 3. What is missing
+## 3. What still needs work (honest inventory)
 
-### 3.1 The device surface itself
+| Area | State |
+|---|---|
+| Agent key grid + live status colors | **Built** — needs granted projects + live threads |
+| Agent key binding | **Built** — auto-fill, pinned slots |
+| Command keys (stop / steer / mark-read) | **Built** — mark-read sequence still buggy |
+| Prompt / PTT / joystick | **Built** |
+| Reasoning dial UI | **Built** — effort not fully applied on every turn path |
+| New chat / startThread | **Gateway ready** — default pad layout may omit New |
+| Approvals accept/reject | **Contracts + UI shell** — live pending feed incomplete |
+| Remapping | **Sheet stores layout** — pad may not fully apply it |
+| Visual pulse / hardware polish | **Partial** |
+| Mac grant / project admin | **Built** — required after every pair |
+| Physical parity acceptance | **Not done** |
 
-Nothing resembling the macropad exists on the phone. The acceptance host has a pairing screen and an acceptance-matrix checklist. There is no agent-key grid, no dial, no joystick, no command keys.
+### Still deliberate non-goals for v1
 
-This is the bulk of the remaining product work and none of it is blocked by anything.
-
-### 3.2 Reasoning depth — the dial's entire function
-
-**No reasoning-level parameter exists anywhere in this codebase.** `PhoneTurnPolicy` resolves sandbox, writable roots, network access, and approval policy — all Mac-decided — and carries nothing about reasoning effort. `turn/start` and `turn/steer` are sent without it.
-
-The dial is the device's most distinctive control and it currently has nothing to talk to. This needs:
-
-- a reasoning-depth field on the turn policy, with the Mac deciding the permitted range;
-- the phone able to *request* a level within that range, since the device changes it mid-task;
-- verification against a live Codex that `turn/start` and `turn/steer` accept it, because the last two app-server parameters written from documentation alone were both wrong in ways only a live probe found.
-
-### 3.3 Agent Key binding
-
-Six slots must map to six live threads, and the mapping has to survive reconnects, respect the device's project scope, and behave sensibly when a bound thread ends or a seventh appears. None of that exists.
-
-### 3.4 Two capabilities blocked by earlier decisions
-
-Both are visible buttons on the device, and both were deliberately closed off:
-
-- **Accept changes / reject output.** Approvals were rejected throughout Phase 2 and assigned to Phase 4. This is the largest security surface in the product: an approval is the moment a phone tap authorises a real filesystem or network action. The device has two dedicated keys for it.
-- **New chat.** `startThread` was deferred at Step 2.12 by explicit decision, behind a Mac feature toggle if v1 allows new threads at all.
-
-Device parity requires revisiting both. Neither should be reopened casually — the Phase 2 reasoning for deferring them was sound — but "the device has a button for it" is a new and legitimate input to those decisions.
-
-### 3.5 Smaller gaps
-
-- **Joystick workflows.** Review-PR, debug, and refactor are canned prompts. Cheap once `sendPrompt` is reachable from a UI.
-- **Push-to-talk.** Speech capture and transcription; an entirely new surface.
-- **Remapping.** Every control on the device is remappable, and the 32 keycaps exist so the layout matches a workflow. A faithful replica needs the same, which is easier in software than in hardware.
+- Full chat transcript / plan text / diffs on the phone (status LEDs only unless a future redacted progress sheet is approved).
+- Phone-held credentials or phone-side tool execution.
 
 ---
 

@@ -57,6 +57,13 @@ public protocol CodexRuntimeSession: Sendable {
   /// roots, network, and approval settings it was started with, and this
   /// call carries no policy fields at all.
   func steerTurn(threadID: String, turnID: String, prompt: String) async throws
+
+  /// Recent thread identifiers the host already knows about, newest first.
+  ///
+  /// Used to bring IDE-hosted sessions into the bridge store so a paired
+  /// phone can observe work that did not start on the phone. Returns only
+  /// opaque IDs — never titles, previews, or paths.
+  func listRecentThreadIDs(limit: Int) async throws -> [String]
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -168,6 +175,23 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
       ])
     )
   }
+
+  public func listRecentThreadIDs(limit: Int) async throws -> [String] {
+    let capped = max(1, min(limit, 64))
+    let response = try await client.request(
+      method: "thread/list",
+      params: .object([
+        "limit": .integer(Int64(capped)),
+        "sortKey": .string("recency_at"),
+        "sortDirection": .string("desc"),
+      ])
+    )
+    let threads = response["data"].array ?? []
+    return threads.compactMap { thread in
+      guard let id = thread["id"].string, !id.isEmpty else { return nil }
+      return id
+    }
+  }
 }
 
 public actor CodexRuntimeSupervisor {
@@ -238,6 +262,11 @@ public actor CodexRuntimeSupervisor {
 
   public func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
     try await readySession().steerTurn(threadID: threadID, turnID: turnID, prompt: prompt)
+  }
+
+  /// Recent opaque thread IDs from the live app-server, for store adoption.
+  public func listRecentThreadIDs(limit: Int = 20) async throws -> [String] {
+    try await readySession().listRecentThreadIDs(limit: limit)
   }
 
   func readySession() throws -> any CodexRuntimeSession {

@@ -84,6 +84,63 @@ final class BridgeStatusModel {
     return false
   }
 
+  /// Whether the Mac can grant a project to a paired device.
+  ///
+  /// Independent of LAN being up: grants are Keychain state. Still requires
+  /// the live composition so the registry and authority exist.
+  var canGrantProject: Bool {
+    live != nil && !isGrantingProject
+  }
+
+  /// In-flight grant so the menu does not double-fire the folder picker.
+  private(set) var isGrantingProject = false
+
+  /// Last admin result for the menu (counts only; no paths or IDs).
+  private(set) var lastAdminSummary: String?
+
+  /// Opens a folder picker and grants that project to every live paired device.
+  ///
+  /// This is the step pairing deliberately leaves out: without it a phone
+  /// authenticates, sees zero threads, and every key is refused.
+  func grantProjectToPairedDevices() {
+    guard let live, !isGrantingProject else { return }
+    isGrantingProject = true
+    lastAdminSummary = nil
+    Task { [weak self] in
+      defer {
+        Task { @MainActor in self?.isGrantingProject = false }
+      }
+      do {
+        let outcomes = try await BridgeDeviceAdministration.grantSelectedFolderToAllDevices(
+          live: live)
+        let devices = outcomes.count
+        let attributed = outcomes.map(\.attributedThreadCount).reduce(0, +)
+        let adopted = outcomes.map(\.adoptedThreadCount).reduce(0, +)
+        await MainActor.run {
+          self?.lastAdminSummary =
+            "Granted to \(devices) device(s); adopted \(adopted) thread(s), "
+            + "attributed \(attributed)"
+          self?.metrics = BridgeConnectionMetrics(
+            lanState: self?.metrics.lanState ?? .disabled,
+            isAdvertising: self?.metrics.isAdvertising ?? false,
+            activeConnections: self?.metrics.activeConnections ?? 0,
+            unauthenticatedConnections: self?.metrics.unauthenticatedConnections ?? 0,
+            pairedDevices: max(self?.metrics.pairedDevices ?? 0, devices),
+            observingDevices: self?.metrics.observingDevices ?? 0,
+            deliveredChanges: self?.metrics.deliveredChanges ?? 0,
+            retentionGaps: self?.metrics.retentionGaps ?? 0
+          )
+        }
+      } catch BridgeDeviceAdministration.Failure.noPairedDevice {
+        await MainActor.run { self?.lastAdminSummary = "No paired device yet — pair first" }
+      } catch BridgeDeviceAdministration.Failure.projectUnresolved {
+        await MainActor.run { self?.lastAdminSummary = "No folder selected" }
+      } catch {
+        await MainActor.run { self?.lastAdminSummary = "Grant failed" }
+      }
+    }
+  }
+
   /// Opens the pairing window and starts a session.
   func openPairingWindow() {
     guard let live, let endpoint = boundEndpoint else { return }

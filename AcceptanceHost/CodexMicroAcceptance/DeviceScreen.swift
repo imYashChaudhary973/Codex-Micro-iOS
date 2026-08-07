@@ -133,12 +133,25 @@ struct DeviceScreen: View {
 
   /// One line describing the connection and the last command, so a press
   /// always produces visible feedback even when the Mac refuses.
+  ///
+  /// Connected-but-empty is deliberately distinct from not connected: the
+  /// former means the phone reached the Mac and the Mac has not granted a
+  /// project (or has no attributed threads). Collapsing them into "Not
+  /// connected" sent people hunting for a network bug when the fix was a
+  /// Mac menu action.
   private var statusLine: String {
     if let outcome = connection.lastOutcome { return outcome.message }
     switch connection.status {
-    case .notPaired: return "Not paired"
+    case .notPaired: return "Not paired — open Pair tab"
     case .connecting: return "Connecting…"
-    case .connected: return "Connected"
+    case .connected:
+      if connection.threads.isEmpty {
+        return "Connected — grant a project on the Mac"
+      }
+      if surface.agentKeys.allSatisfy({ !$0.isBound }) {
+        return "Connected — waiting for sessions"
+      }
+      return "Connected · \(connection.threads.count) session(s)"
     case .failed(let reason): return "Disconnected: \(reason)"
     }
   }

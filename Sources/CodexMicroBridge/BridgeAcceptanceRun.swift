@@ -612,47 +612,14 @@ extension BridgeAcceptanceRun {
   /// so granting them would advertise a capability the bridge would then
   /// refuse — the present-and-failing shape invariant 2 exists to prevent.
   static func grantWorkingScope(_ live: BridgeLiveComposition, deviceID: UUID) async {
-    guard
-      let project = await live.registry.register(
-        rootPath: FileManager.default.currentDirectoryPath)
-    else {
-      report("grant.projectUnresolved")
-      return
-    }
-
-    // The gateway reads roots through this snapshot; refreshing it is what
-    // makes the newly registered project usable for workspace-write turns.
-    await live.workspaceRoots.update(projects: live.registry.allProjects())
-
+    // Production grant path lives on BridgeDeviceAdministration; acceptance
+    // reuses it so the two cannot drift (union widen, capability set, adopt).
     do {
-      _ = try await live.authority.amendCapabilities(
+      _ = try await BridgeDeviceAdministration.grantProject(
+        rootPath: FileManager.default.currentDirectoryPath,
         deviceID: deviceID,
-        capabilities: [.view, .interrupt, .runAgent, .startThread],
-        actionProfileCeiling: .runWorkspace
+        live: live
       )
-      // Widening demands a strict superset, which is right — a "widen" that
-      // narrows or merely restates a scope is a mistake worth refusing. But it
-      // makes the call non-idempotent, and this runs on every launch for every
-      // device: a Mac restarted twice reported `invalidGrant` for a grant that
-      // was already exactly correct, which reads as a broken grant.
-      let existing = try? await live.authority.authoritativeGrant(deviceID: deviceID)
-      if existing?.permittedProjectIDs.contains(project.projectID) == true {
-        report(
-          "grant.alreadyScoped",
-          "project=\(project.projectID.prefix(8))…")
-      } else {
-        // **The union, not the new one alone.** Widening demands a strict
-        // superset, so passing only the project being added drops every
-        // project the device already had and is refused as `invalidGrant`.
-        // That made a second project unreachable: the first one worked because
-        // the grant started empty, and every one after it silently failed.
-        let widened = (existing?.permittedProjectIDs ?? []).union([project.projectID])
-        _ = try await live.authority.widenScope(
-          deviceID: deviceID, permittedProjectIDs: widened)
-        report(
-          "grant.widened",
-          "projects=\(widened.count) added=\(project.projectID.prefix(8))…")
-      }
     } catch {
       report("grant.widenFailed", "\(error)")
     }

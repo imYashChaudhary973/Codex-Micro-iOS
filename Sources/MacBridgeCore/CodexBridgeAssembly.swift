@@ -297,6 +297,28 @@ public actor CodexBridgeAssembly {
     return true
   }
 
+  /// Pulls recent app-server threads into the store so a phone can observe
+  /// IDE-hosted work that never started on the bridge.
+  ///
+  /// Returns how many threads were newly adopted. Already-known IDs are
+  /// re-read so status stays current without inventing content.
+  @discardableResult
+  public func discoverAndAdoptRecentThreads(limit: Int = 20) async -> Int {
+    let ids: [String]
+    do {
+      ids = try await supervisor.listRecentThreadIDs(limit: limit)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: discover.listFailed — \(error)\n".utf8))
+      return 0
+    }
+    var adopted = 0
+    for threadID in ids {
+      if await adoptThread(threadID) { adopted += 1 }
+    }
+    return adopted
+  }
+
   /// Fetches the authoritative snapshot for a thread the store does not know
   /// yet. On failure nothing is stored; the next event retries the same path.
   private func rebuildThread(_ threadID: String) async {

@@ -50,6 +50,15 @@ struct BridgeMenu: View {
       model.openPairingWindow()
     }
     .disabled(!model.canPair)
+    // Pairing alone leaves the phone blind. This is the missing half:
+    // register a folder, widen the grant, and adopt existing Codex threads.
+    Button(model.isGrantingProject ? "Granting Project…" : "Grant Project to Phone…") {
+      model.grantProjectToPairedDevices()
+    }
+    .disabled(!model.canGrantProject)
+    if let summary = model.lastAdminSummary {
+      Text(summary)
+    }
     Divider()
     Button("Quit Codex Micro Bridge") {
       NSApp.terminate(nil)

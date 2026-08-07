@@ -332,6 +332,10 @@ private final class FakeRuntimeSession: CodexRuntimeSession, @unchecked Sendable
     throw CodexRuntimeRequestError.notReady
   }
 
+  func listRecentThreadIDs(limit: Int) async throws -> [String] {
+    []
+  }
+
   func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
     throw CodexRuntimeRequestError.notReady
   }

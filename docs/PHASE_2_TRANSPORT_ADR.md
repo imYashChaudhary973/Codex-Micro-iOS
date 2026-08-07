@@ -310,4 +310,4 @@ No unresolved listener-blocking question remains. The "before any listener merge
   - `531d972` — `feat(spike): prove hardened NIOTS TLS 1.3 WebSocket transport (#9)`
   - `c6577b7` — `feat(spike): add signed probe with Keychain, Bonjour, and LAN evidence (#10)`
 - [Spike implementation findings](../Spikes/Phase2Transport/README.md) and [sanitized evidence](../Spikes/Phase2Transport/EVIDENCE.md); the positive signed-Mac proof was re-run from the merged `c6577b7` tree.
-- [Threat model](THREAT_MODEL.md) · [Phase 2 plan](PHASE_2_PLAN.md) · [Phase 2 status](PHASE_2_STATUS.md) · [System architecture](IOS_COMPANION_ARCHITECTURE.md)
+- [Threat model](THREAT_MODEL.md) · [Product status](STATUS.md) · [Phase 2 plan (archive)](archive/PHASE_2_PLAN.md) · [Phase 2 status (archive)](archive/PHASE_2_STATUS.md)

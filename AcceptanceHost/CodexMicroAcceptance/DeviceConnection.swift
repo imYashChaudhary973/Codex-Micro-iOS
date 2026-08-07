@@ -161,7 +161,30 @@ public final class DeviceConnection: ObservableObject {
     }
     report("connect.subscribed")
     readTask = Task { [weak self] in await self?.readLoop(session) }
+    // Grants and thread adoption often land *after* the first empty snapshot.
+    // Without host-push, a quiet subscription never re-pulls. Soft-refresh
+    // while still empty so "Grant Project on Mac" becomes visible without
+    // force-quitting the phone app.
+    Task { [weak self] in await self?.refreshWhileEmpty() }
     return true
+  }
+
+  /// Re-subscribes a few times while the authorized view is still empty.
+  private func refreshWhileEmpty() async {
+    for attempt in 1...8 {
+      try? await Task.sleep(for: .seconds(3))
+      guard status == .connected, threads.isEmpty, let active = session else { return }
+      report("connect.refreshEmpty", "\(attempt)")
+      let subscribe = SecureObservationSubscribe(
+        subscriptionID: subscriptionID, resumeCursor: nil)
+      do {
+        try await active.send(
+          kind: .observationSubscribe, payload: try JSONEncoder().encode(subscribe))
+      } catch {
+        report("connect.refreshFailed")
+        return
+      }
+    }
   }
 
   /// Set to `1` to press the Stop key once, automatically, after connecting.

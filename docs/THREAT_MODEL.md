@@ -323,7 +323,7 @@ Do not accept or tag Phase 2 without a signed physical iPhone passing the full m
 
 ## References
 
-- [Phase 2 execution plan](PHASE_2_PLAN.md)
 - [Phase 2 transport/TLS ADR](PHASE_2_TRANSPORT_ADR.md)
-- [System architecture](IOS_COMPANION_ARCHITECTURE.md)
-- [Phase 1 status](PHASE_1_STATUS.md)
+- [Product status](STATUS.md)
+- [Phase 2 plan (archive)](archive/PHASE_2_PLAN.md)
+- [System architecture (archive)](archive/IOS_COMPANION_ARCHITECTURE.md)
