@@ -28,13 +28,20 @@ public protocol CodexRuntimeSession: Sendable {
 
   /// Reads one thread with its turns and returns the raw authoritative
   /// thread object, used to rebuild state after a restart.
-  func readThread(threadID: String) async throws -> JSONValue
+  func readThread(threadID: String, includeTurns: Bool) async throws -> JSONValue
 
   /// Sends an explicitly prepared response to a server-initiated request.
   func respondToServerRequest(id: Int64, result: JSONValue) async throws
 
   /// Interrupts exactly one turn.
   func interruptTurn(threadID: String, turnID: String) async throws
+
+  /// Opens a thread and returns its opaque identifier.
+  ///
+  /// Invokes no model and consumes no allowance — it opens a conversation
+  /// rather than running one, which is why it sits on this seam alongside the
+  /// operations that do.
+  func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String
 
   /// Starts exactly one phone-originated turn under bridge-resolved settings
   /// and returns its opaque turn identifier.
@@ -50,6 +57,13 @@ public protocol CodexRuntimeSession: Sendable {
   /// roots, network, and approval settings it was started with, and this
   /// call carries no policy fields at all.
   func steerTurn(threadID: String, turnID: String, prompt: String) async throws
+
+  /// Recent thread identifiers the host already knows about, newest first.
+  ///
+  /// Used to bring IDE-hosted sessions into the bridge store so a paired
+  /// phone can observe work that did not start on the phone. Returns only
+  /// opaque IDs — never titles, previews, or paths.
+  func listRecentThreadIDs(limit: Int) async throws -> [String]
 }
 
 public struct LiveCodexRuntimeSession: CodexRuntimeSession {
@@ -69,12 +83,18 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
     await client.stop()
   }
 
-  public func readThread(threadID: String) async throws -> JSONValue {
+  public func readThread(threadID: String, includeTurns: Bool = true) async throws -> JSONValue {
     let response = try await client.request(
       method: "thread/read",
       params: .object([
         "threadId": .string(threadID),
-        "includeTurns": .bool(true),
+        // A thread that has had no user message is "not materialized" and
+        // refuses this outright, so a freshly opened one could never be read
+        // — and therefore never entered the store, never reached a snapshot,
+        // and never appeared on any device. Asking for turns is right when
+        // rebuilding a thread that has them and wrong when adopting one that
+        // does not, so the caller says which.
+        "includeTurns": .bool(includeTurns),
       ])
     )
     return response["thread"]
@@ -155,6 +175,23 @@ public struct LiveCodexRuntimeSession: CodexRuntimeSession {
       ])
     )
   }
+
+  public func listRecentThreadIDs(limit: Int) async throws -> [String] {
+    let capped = max(1, min(limit, 64))
+    let response = try await client.request(
+      method: "thread/list",
+      params: .object([
+        "limit": .integer(Int64(capped)),
+        "sortKey": .string("recency_at"),
+        "sortDirection": .string("desc"),
+      ])
+    )
+    let threads = response["data"].array ?? []
+    return threads.compactMap { thread in
+      guard let id = thread["id"].string, !id.isEmpty else { return nil }
+      return id
+    }
+  }
 }
 
 public actor CodexRuntimeSupervisor {
@@ -211,8 +248,8 @@ public actor CodexRuntimeSupervisor {
 
   /// Reads one authoritative thread through the active session. Fails closed
   /// when the runtime is not ready.
-  public func readThread(threadID: String) async throws -> JSONValue {
-    try await readySession().readThread(threadID: threadID)
+  public func readThread(threadID: String, includeTurns: Bool = true) async throws -> JSONValue {
+    try await readySession().readThread(threadID: threadID, includeTurns: includeTurns)
   }
 
   public func respondToServerRequest(id: Int64, result: JSONValue) async throws {
@@ -225,6 +262,11 @@ public actor CodexRuntimeSupervisor {
 
   public func steerTurn(threadID: String, turnID: String, prompt: String) async throws {
     try await readySession().steerTurn(threadID: threadID, turnID: turnID, prompt: prompt)
+  }
+
+  /// Recent opaque thread IDs from the live app-server, for store adoption.
+  public func listRecentThreadIDs(limit: Int = 20) async throws -> [String] {
+    try await readySession().listRecentThreadIDs(limit: limit)
   }
 
   func readySession() throws -> any CodexRuntimeSession {

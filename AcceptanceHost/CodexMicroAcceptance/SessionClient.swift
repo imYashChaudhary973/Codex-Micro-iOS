@@ -103,6 +103,15 @@ public actor SessionClient {
         ListenerHandshakeEnvelopeWire(
           kind: .sessionAuthConfirmation,
           payload: try JSONEncoder().encode(completion.confirmation)))
+      // **The host promotes asynchronously and sends nothing back.** Message 3
+      // is the last word in the handshake, so a client that writes its first
+      // application frame immediately can beat the promotion to the gate,
+      // which then reads a sealed frame as pre-authentication traffic and
+      // refuses it with the collapsed `authenticationFailed`. That is the
+      // whole failure: the session was valid, the frame was valid, and it
+      // simply arrived one step early. The in-process device only ever passed
+      // because it happened to pause here.
+      try? await Task.sleep(for: .milliseconds(400))
       session = completion.session
     } catch let reason as SessionClosedReason {
       client.close()
@@ -145,13 +154,36 @@ public actor SessionClient {
 
   /// Receives and opens one application message.
   public func receive() async throws -> ListenerApplicationEnvelopeWire {
-    guard var open = session, let client else { throw Failure.notAuthenticated }
+    guard session != nil, let client else { throw Failure.notAuthenticated }
     let sealed = try await client.receiveRaw()
+    // **Re-read the session after the await, never before it.** Reading first
+    // and writing the whole value back afterwards silently discards whatever a
+    // `send` advanced while this call was suspended on the network — and an
+    // acknowledgement is sent from the read path itself, so the two overlap
+    // constantly. The lost counter surfaced as `counterViolation` on the very
+    // next frame, which reads as a broken session rather than as a race here.
+    guard var open = session else { throw Failure.notAuthenticated }
     let body: Data
     do {
       body = try open.inbound.open(sealed)
     } catch {
-      throw Failure.sessionClosed(.counterViolation)
+      // A host that closes an authenticated session writes a plaintext
+      // close notice, not a sealed frame. Opening it fails on the version
+      // byte — it is `{`, the start of JSON — so the honest reading of an
+      // unopenable first frame is "the host closed and told us why", not
+      // "the crypto disagrees". Reporting the reason is what makes the
+      // difference visible; collapsing it to a counter violation is what
+      // sent this chase after the frame codecs for three rounds.
+      if let notice = try? ListenerHandshakeEnvelopeWire.decode(sealed),
+        notice.kind == .closeNotice
+      {
+        // Report the reason the host actually gave. Substituting a fixed one
+        // here repeats the exact mistake this block was added to fix: it
+        // turns the host's answer into the client's guess.
+        let reason = String(decoding: notice.payload, as: UTF8.self)
+        throw Failure.authenticationRejected("closedByHost:\(reason)")
+      }
+      throw Failure.authenticationRejected("open:\(type(of: error)):\(error)")
     }
     session = open
     guard let envelope = try? ListenerApplicationEnvelopeWire.decode(body) else {

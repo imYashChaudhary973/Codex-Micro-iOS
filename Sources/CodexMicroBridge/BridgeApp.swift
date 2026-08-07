@@ -50,6 +50,15 @@ struct BridgeMenu: View {
       model.openPairingWindow()
     }
     .disabled(!model.canPair)
+    // Pairing alone leaves the phone blind. This is the missing half:
+    // register a folder, widen the grant, and adopt existing Codex threads.
+    Button(model.isGrantingProject ? "Granting Project…" : "Grant Project to Phone…") {
+      model.grantProjectToPairedDevices()
+    }
+    .disabled(!model.canGrantProject)
+    if let summary = model.lastAdminSummary {
+      Text(summary)
+    }
     Divider()
     Button("Quit Codex Micro Bridge") {
       NSApp.terminate(nil)
@@ -142,7 +151,21 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate {
         record("startup.network.ready", level: .info)
         // The acceptance path runs only when the operator asks for it, and
         // exits when it is done so a run cannot be mistaken for a session.
-        if BridgeAcceptanceRun.serves {
+        if BridgeAcceptanceRun.serves, BridgeAcceptanceRun.awaitsRealDevice {
+          // Pair, then keep the very same listener up. Asked separately, these
+          // two modes cannot compose: pairing exits the process on success, so
+          // the device it just paired reconnects to a Mac that has already
+          // quit and reports a bare `connectionFailed`. Together they are the
+          // sequence a person actually performs — pair the phone, then use it.
+          Task {
+            let passed = await BridgeAcceptanceRun.awaitDevicePairing(live, keepListening: true)
+            guard passed else {
+              await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
+              exit(1)
+            }
+            await BridgeAcceptanceRun.serveLoop(live)
+          }
+        } else if BridgeAcceptanceRun.serves {
           // Serve mode never returns; the process stays up so a phone can
           // connect and act.
           Task { await BridgeAcceptanceRun.serve(live) }

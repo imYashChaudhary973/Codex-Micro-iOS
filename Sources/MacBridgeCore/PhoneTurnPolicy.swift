@@ -208,6 +208,20 @@ public protocol CodexTurnSteering: Sendable {
 
 extension CodexRuntimeSupervisor: CodexTurnSteering {}
 
+extension CodexRuntimeSupervisor: CodexThreadStarting {
+  /// Opens a thread on the Mac's terms.
+  ///
+  /// `thread/start` invokes no model and consumes no allowance: it opens a
+  /// conversation Codex can then be asked to act on. The deferral's conditions
+  /// are unchanged — the Mac chooses the project and resolves the policy, and
+  /// the phone supplies neither — so exposing it widens nothing a device may
+  /// cause. ``DeniedThreadStarter`` remains the default, so a bridge that has
+  /// not opted in still refuses every attempt.
+  public func startThread(projectID: String, policy: PhoneTurnPolicy) async throws -> String {
+    try await readySession().startThread(projectID: projectID, policy: policy)
+  }
+}
+
 extension CodexRuntimeSupervisor: CodexTurnStarting {
   public func startTurn(
     threadID: String,

@@ -280,6 +280,26 @@ public protocol ListenerPairingObserving: Sendable {
 
   /// Both sides confirmed. The proposal must become a stored grant.
   func pairingCompleted(_ proposal: PairedDeviceProposal) async
+
+  /// A paired device tried to open a session and was refused.
+  ///
+  /// **For the Mac's eyes only.** The device is told a single collapsed
+  /// reason, deliberately, so an unauthenticated peer cannot distinguish
+  /// "unknown device" from "revoked grant" from "bad signature". The operator
+  /// running the Mac is not an unauthenticated peer and needs the difference:
+  /// without it, a phone that pairs and then cannot connect gives identical
+  /// output for causes with entirely different fixes.
+  func sessionAuthenticationFailed(stage: String, reason: String) async
+
+  /// A paired device opened a session.
+  func sessionAuthenticated(deviceID: UUID) async
+}
+
+extension ListenerPairingObserving {
+  // Defaulted so every existing conformer — and every listener that predates
+  // this seam — keeps its current behaviour of observing pairing only.
+  public func sessionAuthenticationFailed(stage: String, reason: String) async {}
+  public func sessionAuthenticated(deviceID: UUID) async {}
 }
 
 /// Discards both facts. The default, so a listener built without a pairing UI
@@ -396,15 +416,23 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
     _ payload: Data,
     connectionID: UUID
   ) async -> ListenerHandshakeOutcome {
-    guard let request = try? JSONDecoder().decode(SecureSessionAuthRequest.self, from: payload),
-      let offer = try? await session.beginAuthentication(
-        request: request, connectionID: connectionID),
-      let body = try? JSONEncoder().encode(offer.response),
-      let reply = try? ListenerHandshakeEnvelope(kind: .sessionAuthResponse, payload: body)
-    else {
+    // The reason is reported to the Mac and never sent to the device. What
+    // reaches the wire stays exactly as collapsed as it was: an unauthenticated
+    // peer learns only that authentication failed, so it cannot probe for
+    // whether a device is known, revoked, or merely mis-signed. What changed is
+    // that the Mac no longer throws the reason away too — a phone that will not
+    // connect used to be undiagnosable from either end.
+    do {
+      let request = try JSONDecoder().decode(SecureSessionAuthRequest.self, from: payload)
+      let offer = try await session.beginAuthentication(
+        request: request, connectionID: connectionID)
+      let reply = try ListenerHandshakeEnvelope(
+        kind: .sessionAuthResponse, payload: try JSONEncoder().encode(offer.response))
+      return .reply(reply)
+    } catch {
+      await observer.sessionAuthenticationFailed(stage: "begin", reason: "\(error)")
       return .close(.authenticationFailed)
     }
-    return .reply(reply)
   }
 
   private func handleAuthConfirmation(
@@ -417,8 +445,11 @@ public struct CoordinatorListenerHandshakeHandler: ListenerHandshakeHandling {
       let authentication = try? await session.completeAuthentication(
         confirmation: confirmation, connectionID: connectionID)
     else {
+      await observer.sessionAuthenticationFailed(stage: "confirm", reason: "rejected")
       return .close(.authenticationFailed)
     }
+    await observer.sessionAuthenticated(deviceID: authentication.session.identity.deviceID)
+
     await frames.store(
       ListenerSessionFrames(
         deviceID: authentication.session.identity.deviceID,

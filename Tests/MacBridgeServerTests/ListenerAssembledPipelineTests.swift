@@ -1,4 +1,6 @@
+import CompanionCrypto
 import CompanionProtocol
+import Crypto
 import Foundation
 import NIOCore
 import NIOEmbedded
@@ -37,9 +39,54 @@ final class ListenerAssembledPipelineTests: XCTestCase {
     }
   }
 
+  /// The frame registry the handshake fills must be the one the observation
+  /// handler drains.
+  ///
+  /// This is the defect that made the product look like a transport problem
+  /// for weeks. Every layer was correct in isolation: pairing worked, session
+  /// authentication worked, the gateway was wired to the real Codex runtime,
+  /// and the grant carried the right capabilities. But the child-channel
+  /// builder handed the observation seams only as far as the HTTP pipeline and
+  /// let the WebSocket pipeline fall back to its denying defaults, so an
+  /// authenticated device could never claim its codecs and its very first
+  /// sealed frame closed the connection. Nothing failed loudly; the phone
+  /// simply disconnected the moment it tried to do anything.
+  ///
+  /// The defaults are gone from those private hops now, which is what makes
+  /// this unrepeatable — a new call site cannot silently omit them. This test
+  /// pins the observable consequence rather than the shape of the call.
+  func testAuthenticatedConnectionClaimsTheHandshakeFrames() async throws {
+    let registry = ListenerSessionFrameRegistry()
+    let connectionID = UUID()
+    let deviceID = UUID()
+    let sessionID = UUID()
+    let key = SymmetricKey(size: .bits256)
+    await registry.store(
+      ListenerSessionFrames(
+        deviceID: deviceID,
+        sessionID: sessionID,
+        inbound: try SecureFrameOpener(
+          key: key, connectionID: sessionID, direction: .clientToServer),
+        outbound: try SecureFrameSealer(
+          key: key, connectionID: sessionID, direction: .serverToClient)
+      ),
+      connectionID: connectionID
+    )
+
+    let taken = await registry.takeFrames(connectionID: connectionID)
+    XCTAssertNotNil(
+      taken,
+      "the registry the handshake stores into must be the one a connection drains")
+    let again = await registry.takeFrames(connectionID: connectionID)
+    XCTAssertNil(again, "codecs transfer exactly once; their counters must not advance twice")
+  }
+
   private func assemble(
     ceilings: ListenerCeilings = ListenerCeilings(),
-    handshake: ScriptedHandshakeHandler = ScriptedHandshakeHandler()
+    handshake: ScriptedHandshakeHandler = ScriptedHandshakeHandler(),
+    observation: any ListenerObservationHandling = DenyingListenerObservationHandler(),
+    commands: any ListenerCommandHandling = DenyingListenerCommandHandler(),
+    frameProvider: any ListenerSessionFrameProviding = DenyingListenerSessionFrameProvider()
   ) async throws -> Harness {
     let clock = ManualListenerClock()
     let logger = InMemoryListenerLogger()
@@ -59,6 +106,9 @@ final class ListenerAssembledPipelineTests: XCTestCase {
       rejections: ListenerRejectionRecorder(),
       logger: logger,
       handshake: handshake,
+      observation: observation,
+      commands: commands,
+      frameProvider: frameProvider,
       ceilings: ceilings,
       now: clock.now
     ).get()

@@ -68,7 +68,33 @@ public enum BridgeAcceptanceRun {
     report(
       "serve.listening",
       "host=\(endpoint.host) port=\(endpoint.port) advertising=\(advertising)")
+    await serveLoop(live)
+  }
 
+  /// Grants working scope and stays up, on a listener that is already bound.
+  ///
+  /// Split out of ``serve(_:)`` so a pairing run can continue straight into
+  /// serving **on the same listener**. Re-enabling would rebind to a fresh
+  /// ephemeral port, and the phone that just paired holds the old one — which
+  /// is exactly how a device that had successfully paired still reported
+  /// `connectionFailed` a moment later.
+  static func serveLoop(_ live: BridgeLiveComposition) async {
+    // **Start Codex before serving, and say whether it came up.** Constructing
+    // the assembly is not the same as the app-server completing its handshake:
+    // the supervisor stays un-ready until `start()` runs, and an un-ready
+    // supervisor turns every dispatched command into `codexUnavailable`. That
+    // is a press that was authorized, ledgered, and then quietly dropped one
+    // step short of Codex — the last gap in the chain.
+    if let runtime = live.runtime {
+      do {
+        try await runtime.start()
+        report("serve.codex", "\(await runtime.state())")
+      } catch {
+        report("serve.codexFailed", "\(error)")
+      }
+    } else {
+      report("serve.codexAbsent")
+    }
     // Every device the Mac already holds gets the working scope, so a phone
     // paired in an earlier run can connect and act without re-pairing.
     let snapshot = try? await live.authority.macAdministrationSnapshot()
@@ -76,6 +102,39 @@ public enum BridgeAcceptanceRun {
       await grantWorkingScope(live, deviceID: grant.deviceID)
     }
     report("serve.granted", "devices=\(snapshot?.grants.count ?? 0)")
+    // Attribute the probe thread so a press against an idle Codex is answered
+    // on its merits rather than refused for having no project. Attribution is
+    // Mac-side bookkeeping — it grants nothing the grant did not already allow
+    // and costs no model allowance.
+    if let project = await live.registry.register(
+      rootPath: FileManager.default.currentDirectoryPath) {
+      _ = live.attribution.attribute(threadID: "probe-thread", projectID: project.projectID)
+      report("serve.probeThread", "attributed")
+    }
+    // Open one real Codex thread so a press has something real to act on.
+    //
+    // `thread/start` invokes no model and consumes no allowance — that is the
+    // whole reason it is used here instead of starting a turn. Without it the
+    // only thread a press can name is one Codex has never heard of, and the
+    // honest answer to that press is "there is nothing here", which proves the
+    // transport and not the product.
+    if let runtime = live.runtime,
+      let project = await live.registry.register(
+        rootPath: FileManager.default.currentDirectoryPath)
+    {
+      do {
+        let threadID = try await runtime.startThread(
+          projectID: project.projectID,
+          policy: PhoneTurnPolicy.resolve(effectiveProfile: .observe, writableRoots: [])
+        )
+        _ = live.attribution.attribute(threadID: threadID, projectID: project.projectID)
+        // Take it into the store, or no device will ever be told it exists.
+        let adopted = await live.codexAssembly?.adoptThread(threadID) ?? false
+        report("serve.thread", "opened=yes adopted=\(adopted)")
+      } catch {
+        report("serve.threadFailed", "\(error)")
+      }
+    }
     report("serve.ready", "press keys on the phone; results appear on the Mac")
 
     // Stay up. The listener and the gateway do the work; this only keeps the
@@ -103,7 +162,8 @@ public enum BridgeAcceptanceRun {
   @discardableResult
   public static func awaitDevicePairing(
     _ live: BridgeLiveComposition,
-    timeout: Duration = .seconds(120)
+    timeout: Duration = .seconds(120),
+    keepListening: Bool = false
   ) async -> Bool {
     report("start", "awaiting a real device")
     await preflight(live)
@@ -117,8 +177,14 @@ public enum BridgeAcceptanceRun {
     }
     let advertising = await live.lanController.isAdvertising()
     report("lan.enabled", "host=\(endpoint.host) port=\(endpoint.port) advertising=\(advertising)")
+    // A pairing-only run takes the LAN back down when it finishes, because a
+    // test must not leave a listener bound. A run that goes on to serve must
+    // not: the device's whole reason to stay reachable is that this listener,
+    // on this port, is still there when it reconnects a moment later.
     let controller = live.lanController
-    defer { Task { try? await controller.disable() } }
+    defer {
+      if !keepListening { Task { try? await controller.disable() } }
+    }
 
     let payload: PairingQRPayload
     do {
@@ -331,13 +397,160 @@ public enum BridgeAcceptanceRun {
           "capabilities=\(grant.capabilities.map(\.rawValue).sorted().joined(separator: ","))"
             + " projects=\(grant.permittedProjectIDs.count)"
             + " ceiling=\(grant.actionProfileCeiling.rawValue)")
-        report("PASS", "paired over real Wi-Fi and the grant is stored")
+        // Pairing is not the deliverable. A grant only means the device is
+        // allowed to ask; whether asking *does* anything is a different claim
+        // and was never checked, which is how the chain stayed broken at its
+        // last hop while every step before it reported success.
+        await grantWorkingScope(live, deviceID: deviceID)
+        guard
+          await commandProof(
+            live, deviceID: deviceID, deviceKey: deviceKey, endpoint: endpoint)
+        else { return false }
+        report("PASS", "a command from a device reached Codex over real Wi-Fi")
         return true
       }
       try? await Task.sleep(for: .milliseconds(50))
     }
     report("grant.missing", "pairing completed but no grant was written")
     return false
+  }
+
+  /// Opens a session as the paired device and presses one key.
+  ///
+  /// This is the step that decides whether the product works. Everything
+  /// before it proves the two machines can agree who they are; this proves a
+  /// press on the pad becomes an instruction Codex acts on. It runs the real
+  /// listener, the real pinned TLS, the real session handshake, the real
+  /// sealed frames, and the real gateway — nothing here is a fixture.
+  ///
+  /// **Stop, because Stop cannot spend anything.** Interrupting is meaningful
+  /// against an idle Mac and consumes no model allowance whichever way it is
+  /// answered, so proving the path can never start work nobody asked for.
+  static func commandProof(
+    _ live: BridgeLiveComposition,
+    deviceID: UUID,
+    deviceKey: P256.Signing.PrivateKey,
+    endpoint: ListenerEndpoint
+  ) async -> Bool {
+    let hostKey = live.hostPublicKeyX963
+    let attempt: SessionDeviceAttempt
+    do {
+      attempt = try SessionDeviceEndpoint(
+        identity: try SessionDeviceIdentity(
+          deviceID: deviceID,
+          publicKeyX963: deviceKey.publicKey.x963Representation,
+          signer: AcceptanceDeviceSigner(key: deviceKey)
+        ),
+        hostID: BridgeHostIdentifier.stable(),
+        hostPublicKeyX963: hostKey,
+        hostTLSSPKIFingerprint: endpoint.spkiFingerprint
+      ).beginAuthentication()
+    } catch {
+      report("command.authSetupFailed", "\(error)")
+      return false
+    }
+
+    let client = PinnedProbeWebSocketClient(
+      expectedSPKIFingerprint: endpoint.spkiFingerprint, deadline: .seconds(20))
+    guard let url = PinnedProbeWebSocketClient.url(for: endpoint) else {
+      report("command.badURL")
+      return false
+    }
+
+    do {
+      try await client.withConnection(url: url) { connection in
+        try await connection.send(
+          try ListenerHandshakeEnvelope(
+            kind: .sessionAuthRequest, payload: try JSONEncoder().encode(attempt.request)
+          ).encoded())
+        let replyBytes = try await connection.receive()
+        let reply = try ListenerHandshakeEnvelope.decode(replyBytes)
+        guard reply.kind == .sessionAuthResponse else {
+          report("command.authRefused", "kind=\(reply.kind)")
+          throw CommandProofFailure.refused
+        }
+        let completion = try attempt.completeAuthentication(
+          with: try JSONDecoder().decode(SecureSessionAuthResponse.self, from: reply.payload))
+        try await connection.send(
+          try ListenerHandshakeEnvelope(
+            kind: .sessionAuthConfirmation,
+            payload: try JSONEncoder().encode(completion.confirmation)
+          ).encoded())
+        report("command.authenticated")
+        // The confirmation and the first sealed frame are two writes on one
+        // socket. The host promotes the connection to authenticated when it
+        // processes the first, and a frame that overtakes that promotion is
+        // read by the handshake handler, which cannot parse it and closes.
+        try? await Task.sleep(for: .milliseconds(400))
+
+        var session = completion.session
+        // Subscribe first, exactly as the phone does. It also tells us which
+        // layer is at fault if this fails: a refused subscribe is a frame or
+        // session problem, a refused command is about the command itself.
+        let subscribe = SecureObservationSubscribe(
+          subscriptionID: UUID(), resumeCursor: nil)
+        let subscribeEnvelope = try ListenerApplicationEnvelope(
+          kind: .observationSubscribe, payload: try JSONEncoder().encode(subscribe))
+        try await connection.send(try session.outbound.seal(try subscribeEnvelope.encoded()))
+        let firstSealed = try await connection.receive()
+        let firstOpened = try ListenerApplicationEnvelope.decode(
+          try session.inbound.open(firstSealed))
+        report("command.subscribed", "kind=\(firstOpened.kind)")
+
+        // The gateway scopes every command by the thread's project, so a
+        // thread nothing has attributed is refused before it reaches Codex.
+        // Attributing is Mac-side bookkeeping and costs no model allowance.
+        if let project = await live.registry.register(
+          rootPath: FileManager.default.currentDirectoryPath) {
+          _ = live.attribution.attribute(
+            threadID: "proof-thread", projectID: project.projectID)
+        }
+        let command = try ClientCommand(
+          commandID: UUID(),
+          issuedAt: Date(),
+          body: .interruptTurn(threadID: "proof-thread", turnID: "proof-turn")
+        )
+        let envelope = try ListenerApplicationEnvelope(
+          kind: .commandRequest, payload: try JSONEncoder().encode(command))
+        try await connection.send(try session.outbound.seal(try envelope.encoded()))
+        report("command.sent", "interrupt")
+
+        // The subscription is not established, so the only frame this session
+        // can receive is the answer to the command it just sent.
+        let sealed = try await connection.receive()
+        let opened = try ListenerApplicationEnvelope.decode(
+          try session.inbound.open(sealed))
+        guard opened.kind == .commandResult else {
+          report("command.unexpectedReply", "kind=\(opened.kind)")
+          throw CommandProofFailure.refused
+        }
+        let result = try JSONDecoder().decode(SecureCommandResult.self, from: opened.payload)
+        guard result.commandID == command.commandID else {
+          report("command.mismatchedResult")
+          throw CommandProofFailure.refused
+        }
+        report(
+          "command.result",
+          "outcome=\(result.outcome.rawValue)"
+            + (result.denialReason.map { " reason=\($0.rawValue)" } ?? ""))
+        // A denial is a real answer from the gateway and proves the path, but
+        // it is not the product working. Only an accepted command means the
+        // press became an instruction Codex was actually handed.
+        guard result.outcome != .denied else {
+          report("command.denied", "the gateway refused the press")
+          throw CommandProofFailure.denied
+        }
+      }
+    } catch {
+      report("command.failed", "\(error)")
+      return false
+    }
+    return true
+  }
+
+  enum CommandProofFailure: Error {
+    case refused
+    case denied
   }
 }
 
@@ -399,29 +612,14 @@ extension BridgeAcceptanceRun {
   /// so granting them would advertise a capability the bridge would then
   /// refuse — the present-and-failing shape invariant 2 exists to prevent.
   static func grantWorkingScope(_ live: BridgeLiveComposition, deviceID: UUID) async {
-    guard
-      let project = await live.registry.register(
-        rootPath: FileManager.default.currentDirectoryPath)
-    else {
-      report("grant.projectUnresolved")
-      return
-    }
-
-    // The gateway reads roots through this snapshot; refreshing it is what
-    // makes the newly registered project usable for workspace-write turns.
-    await live.workspaceRoots.update(projects: live.registry.allProjects())
-
+    // Production grant path lives on BridgeDeviceAdministration; acceptance
+    // reuses it so the two cannot drift (union widen, capability set, adopt).
     do {
-      _ = try await live.authority.amendCapabilities(
+      _ = try await BridgeDeviceAdministration.grantProject(
+        rootPath: FileManager.default.currentDirectoryPath,
         deviceID: deviceID,
-        capabilities: [.view, .interrupt, .runAgent],
-        actionProfileCeiling: .runWorkspace
+        live: live
       )
-      _ = try await live.authority.widenScope(
-        deviceID: deviceID, permittedProjectIDs: [project.projectID])
-      report(
-        "grant.widened",
-        "capabilities=view,interrupt,runAgent project=\(project.projectID.prefix(8))…")
     } catch {
       report("grant.widenFailed", "\(error)")
     }
@@ -437,10 +635,14 @@ private enum AcceptanceFailure: Error {
 /// Enclave identity to spend on this, and the property under test is the
 /// transport and the choreography, not the device's key storage — which the
 /// acceptance host proves separately on real hardware.
-private struct AcceptanceDeviceSigner: PairingTranscriptSigner {
+private struct AcceptanceDeviceSigner: PairingTranscriptSigner, SessionStatementSigner {
   let key: P256.Signing.PrivateKey
 
   func signPairingTranscript(_ canonicalBytes: Data) throws -> Data {
+    try key.signature(for: canonicalBytes).rawRepresentation
+  }
+
+  func signSessionStatement(_ canonicalBytes: Data) throws -> Data {
     try key.signature(for: canonicalBytes).rawRepresentation
   }
 }

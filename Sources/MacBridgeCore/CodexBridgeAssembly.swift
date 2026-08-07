@@ -262,6 +262,63 @@ public actor CodexBridgeAssembly {
     }
   }
 
+  /// Takes a thread the bridge just opened into the store.
+  ///
+  /// `thread/start` returns an identifier and emits no event, so a thread
+  /// created through the runtime is real on Codex and invisible to the store —
+  /// and therefore absent from every device snapshot. A device then has no
+  /// thread to name, and a press against the one it invents is answered
+  /// `codexUnavailable`. This closes that gap using the same authoritative
+  /// read the event path already uses for a thread the store does not know.
+  /// Returns whether the store actually took it. `rebuildThread` fails
+  /// silently by design — the next event retries — but a caller adopting a
+  /// thread it just created has no next event to wait for, so a silent failure
+  /// there is indistinguishable from success and leaves every device with an
+  /// empty world.
+  @discardableResult
+  public func adoptThread(_ threadID: String) async -> Bool {
+    let thread: JSONValue
+    do {
+      thread = try await supervisor.readThread(threadID: threadID, includeTurns: false)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: adopt.readFailed — \(error)\n".utf8))
+      return false
+    }
+    do {
+      try await store.replaceThread(with: thread)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: adopt.storeFailed — \(error)\n".utf8))
+      return false
+    }
+    _ = try? await journal.append(.threadUpdated(threadID: threadID))
+    await emitStateChanged()
+    return true
+  }
+
+  /// Pulls recent app-server threads into the store so a phone can observe
+  /// IDE-hosted work that never started on the bridge.
+  ///
+  /// Returns how many threads were newly adopted. Already-known IDs are
+  /// re-read so status stays current without inventing content.
+  @discardableResult
+  public func discoverAndAdoptRecentThreads(limit: Int = 20) async -> Int {
+    let ids: [String]
+    do {
+      ids = try await supervisor.listRecentThreadIDs(limit: limit)
+    } catch {
+      FileHandle.standardError.write(
+        Data("codex-micro: discover.listFailed — \(error)\n".utf8))
+      return 0
+    }
+    var adopted = 0
+    for threadID in ids {
+      if await adoptThread(threadID) { adopted += 1 }
+    }
+    return adopted
+  }
+
   /// Fetches the authoritative snapshot for a thread the store does not know
   /// yet. On failure nothing is stored; the next event retries the same path.
   private func rebuildThread(_ threadID: String) async {
