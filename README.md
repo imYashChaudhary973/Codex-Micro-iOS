@@ -1,25 +1,25 @@
-# Codex Micro
+:# Codex Micro
 
-iPhone pad that controls **Codex on your Mac** — same idea as OpenAI’s physical Codex Micro: six glanceable agent keys, command keys, reasoning dial, joystick workflows, push-to-talk. The Mac stays the authoritative host; the phone never holds your OpenAI credential and never runs tools itself.
+iPhone pad that controls **Codex on your Mac** — the same idea as OpenAI's physical Codex Micro: six glanceable agent keys, command keys, a reasoning dial, joystick workflows, and push-to-talk. The Mac stays the authoritative host; the phone never holds your OpenAI credential and never runs tools itself.
 
-## Current truth
+## Current state
 
 | Layer | Status |
 |---|---|
-| Codex app-server integration | Working (pinned CLI/schema gate) |
+| Codex app-server integration | Accepted |
 | Mac bridge core | Accepted |
-| Secure LAN pairing + WSS | Built; physical pairing proven |
-| Phone device pad UI | Built (not yet formally parity-accepted) |
-| **Grant / project admin** | **Required after pair** — use **Grant Project to Phone…** in the Mac menu |
-| Physical parity acceptance | Matrix exists; full run pending |
+| Secure LAN pairing + WSS | Built; physical pairing proven on Mac |
+| Phone device pad UI | Built; not yet parity-accepted |
+| Grant / project admin | **Required after pair** |
+| Phase 3 physical parity acceptance | Matrix ready; full run pending |
 
-If the phone is connected but all keys stay dark, you almost always need to **grant a project** on the Mac. Pairing alone intentionally grants observe with an empty project list.
+If the phone is connected but all keys stay dark, you almost always need to **grant a project** on the Mac. Pairing alone intentionally grants only `observe` with an empty project list.
 
 ## Run it (personal Mac + iPhone)
 
 ### Mac
 
-1. Install a supported Codex CLI (bridge gates on the pinned version/schema).
+1. Install a supported Codex CLI (the bridge gates on a pinned version/schema).
 2. Build and run the menu-bar bridge (`codex-micro-bridge` or the Xcode Mac host).
 3. Menu → **Enable LAN Access** (off on every launch by design).
 4. **Pair a Device…** — show QR; confirm the phrase on both sides.
@@ -35,14 +35,14 @@ If the phone is connected but all keys stay dark, you almost always need to **gr
 
 Status line meanings:
 
-- **Not paired** — complete Pair tab first  
-- **Connected — grant a project on the Mac** — pair worked; Mac admin step missing  
-- **Connected · N session(s)** — observation is live  
+- **Not paired** — complete the Pair tab first.
+- **Connected — grant a project on the Mac** — pair worked; the Mac admin step is missing.
+- **Connected · N session(s)** — observation is live.
 
 ### Diagnostics
 
-Mac stderr: `codex-micro: …`  
-Phone stderr: `device: …`  
+- Mac stderr: `codex-micro: …`
+- Phone stderr: `device: …`
 
 ## Development commands
 
@@ -55,25 +55,28 @@ swift run codex-micro-spike doctor
 
 Live smoke turns spend Codex allowance and need explicit confirm flags (see spike help).
 
-## Docs (living)
+## Documentation
 
-| Doc | Role |
+| Doc | What it covers |
 |---|---|
-| [Device parity](docs/CODEX_MICRO_DEVICE_PARITY.md) | What the product is (controls, invariants) |
-| [Phase 3 plan](docs/PHASE_3_PLAN.md) | Delivery steps until physical acceptance |
-| [Threat model](docs/THREAT_MODEL.md) | Security baseline |
-| [Transport ADR](docs/PHASE_2_TRANSPORT_ADR.md) | TLS / WSS / identity decisions |
-| [Git workflow](docs/GIT_WORKFLOW.md) | Branch / PR rules |
-| [Status](docs/STATUS.md) | One-page snapshot |
+| [docs/STATUS.md](docs/STATUS.md) | Current state and remaining gates |
+| [docs/PRODUCT.md](docs/PRODUCT.md) | Product definition: controls, invariants, parity |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phase 3 delivery plan |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview and package targets |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security model summary |
+| [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) | Branch, commit, and PR rules |
+| [docs/reference/THREAT_MODEL.md](docs/reference/THREAT_MODEL.md) | Accepted Phase 2 threat model |
+| [docs/reference/TRANSPORT_ADR.md](docs/reference/TRANSPORT_ADR.md) | Accepted Phase 2 transport/TLS/identity ADR |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Phase acceptance history |
 
-Historical phase evidence lives under `docs/archive/` when present, or in git history.
+Historical phase evidence lives in `docs/archive/`. See `docs/README.md` for the docs index.
 
 ## Architecture in one paragraph
 
-Phone pairs over LAN (QR + short authentication string), pins the Mac TLS SPKI, and opens a sealed session. Observation delivers **status-only** thread projections scoped by Mac grants. Commands go through one gateway (`sendPrompt`, `interrupt`, `steer`, `startThread`, …) with Mac-resolved sandbox and project policy. Approvals remain opt-in and highest privilege.
+The phone pairs with the Mac over the same LAN (QR + short authentication string), pins the Mac TLS SPKI, and opens a sealed session. The Mac delivers **status-only** thread projections scoped by its grants. Commands flow through a single gateway (`sendPrompt`, `interrupt`, `steer`, `startThread`, …) with Mac-resolved sandbox and project policy. Approvals remain opt-in and the highest-privilege action in the product.
 
 ## Out of scope (for now)
 
-- Full chat transcript / model token stream on the phone  
-- Multi-model backends (Claude, Ollama, …)  
-- Cloud relay; App Store distribution  
+- Full chat transcript / model token stream on the phone.
+- Multi-model backends (Claude, Ollama, …).
+- Cloud relay; App Store distribution.

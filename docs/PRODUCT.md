@@ -1,8 +1,8 @@
-# Codex Micro — Device Parity Specification
+# Product Definition — Codex Micro for iPhone
 
-**Status:** Product definition. Pad UI and controls are largely **built**; physical parity acceptance is **not** complete. See [STATUS.md](STATUS.md) and [PHASE_3_PLAN.md](PHASE_3_PLAN.md).
+**Status:** Product definition. Pad UI and controls are largely **built**; physical parity acceptance is **not** complete. See [STATUS.md](STATUS.md) and [ROADMAP.md](ROADMAP.md).
 
-**Purpose:** This project replicates **OpenAI's Codex Micro** — a physical macropad, released 15 July 2026, built with Work Louder, priced at $230 and currently sold out — as an iPhone app that controls Codex on a paired Mac. The phone is meant to *be* the device: the same controls, the same feedback, the same effect on Codex.
+This project replicates **OpenAI's Codex Micro** — a physical macropad released July 2026, built with Work Louder — as an iPhone app that controls Codex on a paired Mac. The phone *is* the device: the same controls, the same feedback, the same effect on Codex.
 
 Phases 0–2 are the secure plumbing. Phase 3 is the device surface. This document is the product specification.
 

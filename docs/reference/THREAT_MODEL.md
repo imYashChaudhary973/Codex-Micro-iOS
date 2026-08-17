@@ -121,7 +121,7 @@ Phase 2 P0 enables only `markThreadRead` and `interruptTurn`. It rejects approva
 
 | Material | Classification and lifecycle |
 |---|---|
-| Mac host-signing private key | **Secure Enclave required** ([ADR §6](PHASE_2_TRANSPORT_ADR.md)): P-256 `kSecAttrTokenIDSecureEnclave` key with `privateKeyUsage`-only access control, `AfterFirstUnlockThisDeviceOnly`, Data Protection Keychain, ThisDeviceOnly — never synced or backed up. Software Data Protection Keychain keys are rejected: the spike proved them exportable by the creating process. Macs without a Secure Enclave fail closed. Persistent; no silent rotation; loss while grants exist disables LAN and requires explicit reset/re-pairing. Normal reconnect never prompts for biometrics. |
+| Mac host-signing private key | **Secure Enclave required** ([ADR §6](TRANSPORT_ADR.md)): P-256 `kSecAttrTokenIDSecureEnclave` key with `privateKeyUsage`-only access control, `AfterFirstUnlockThisDeviceOnly`, Data Protection Keychain, ThisDeviceOnly — never synced or backed up. Software Data Protection Keychain keys are rejected: the spike proved them exportable by the creating process. Macs without a Secure Enclave fail closed. Persistent; no silent rotation; loss while grants exist disables LAN and requires explicit reset/re-pairing. Normal reconnect never prompts for biometrics. |
 | Host ID | Random non-secret identifier stored with the host identity. Possession never authenticates. Not logged or published in Bonjour. |
 | TLS private key and certificate | Separate Secure Enclave P-256 key with the same attribute profile (ADR §6). Certificate fields/serial are public and content-neutral (ADR §7): 30-day validity, same-key renewal at two-thirds lifetime, SPKI pinned by clients. Key rotation requires a host-signed, generation-monotonic anti-rollback statement delivered over an authenticated session before activation (ADR §7). |
 | Grant-store encryption key | **Not applicable** — decided in ADR §10: authority records live as a single versioned bounded canonical blob directly in the device-only Data Protection Keychain behind one actor, with atomic whole-blob replacement. No file-backed store and no separate encryption key exist. Missing/duplicate/undecodable/rolled-back blob disables LAN. |
@@ -291,7 +291,7 @@ These are baseline core controls, not LAN/TLS/pairing/authentication/revocation 
 
 ### Before Step 2.2 — all resolved
 
-Every Step 2.1 stop condition is resolved by [the accepted transport ADR](PHASE_2_TRANSPORT_ADR.md):
+Every Step 2.1 stop condition is resolved by [the accepted transport ADR](TRANSPORT_ADR.md):
 
 - [x] TLS stack and non-exportable-key support — ADR §4, proof in §6.
 - [x] TLS version, 0-RTT, resumption, certificate, and rotation policy — ADR §5, §7.
@@ -323,7 +323,7 @@ Do not accept or tag Phase 2 without a signed physical iPhone passing the full m
 
 ## References
 
-- [Phase 2 transport/TLS ADR](PHASE_2_TRANSPORT_ADR.md)
-- [Product status](STATUS.md)
-- [Phase 2 plan (archive)](archive/PHASE_2_PLAN.md)
-- [System architecture (archive)](archive/IOS_COMPANION_ARCHITECTURE.md)
+- [Phase 2 transport/TLS ADR](TRANSPORT_ADR.md)
+- [Product status](../STATUS.md)
+- [Phase 2 plan (archive)](../archive/PHASE_2_PLAN.md)
+- [System architecture (archive)](../archive/IOS_COMPANION_ARCHITECTURE.md)

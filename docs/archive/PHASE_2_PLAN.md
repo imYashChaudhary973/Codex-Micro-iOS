@@ -6,7 +6,7 @@
 
 **Scope:** Native local-LAN pairing, authenticated encrypted sessions, semantic command transport, discovery, revocation, and reconnect/replay. No iOS product UI and no public/relay networking.
 
-**Step 2.1 decisions:** [Threat model](THREAT_MODEL.md) · [Transport/TLS ADR](PHASE_2_TRANSPORT_ADR.md) · [Phase 2 status](PHASE_2_STATUS.md)
+**Step 2.1 decisions:** [Threat model](../reference/THREAT_MODEL.md) · [Transport/TLS ADR](../reference/TRANSPORT_ADR.md) · [Phase 2 status](PHASE_2_STATUS.md)
 
 ## 1. Objective and completion definition
 
