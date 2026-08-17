@@ -1,10 +1,14 @@
-# Phase 3 — Device Parity Plan
+# Roadmap
 
 **Status:** Approved for execution.
 
 **Goal:** The iPhone becomes the Codex Micro. Same controls, same feedback, same effect on Codex.
 
-**Scope:** The device surface and every control on it — six agent keys, the command keys, the reasoning dial, the joystick, push-to-talk, and remapping. Phase 2's transport is the foundation and is not revisited except where a control needs something the protocol does not yet carry.
+**Scope:** Phase 3 covers the device surface and every control on it — six agent keys, command keys, reasoning dial, joystick, push-to-talk, and remapping. Phase 2's transport is the foundation and is not revisited except where a control needs something the protocol does not yet carry.
+
+**Security baseline:** [Threat model](reference/THREAT_MODEL.md) · [Transport ADR](reference/TRANSPORT_ADR.md).  
+**Workflow:** [Git workflow](GIT_WORKFLOW.md).  
+**Product spec:** [PRODUCT.md](PRODUCT.md).
 
 ---
 

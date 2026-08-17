@@ -1,34 +1,35 @@
-# Codex Micro — Status
+# Status
 
-**Snapshot:** 2026-08-07  
-**Branch focus:** end-to-end usability (grant admin + command path)
+**Snapshot:** 2026-08-17  
+**Current focus:** Phase 3 device parity acceptance.
 
-## What works
+## State
 
-- Mac menu-bar bridge starts Codex runtime and can enable LAN.
-- Pairing (QR + SAS) stores a device grant on the Mac and pins on the phone.
-- Authenticated sealed session + observation subscribe.
-- Phone Device pad: agent keys, commands, dial, joystick, PTT, remapping UI.
-- Command gateway can reach live Codex when grants and runtime allow it.
-- **Grant Project to Phone…** Mac menu action registers a folder, widens scope, adopts recent threads.
+| Layer | Status |
+|---|---|
+| Codex app-server integration | Accepted |
+| Mac bridge core | Accepted |
+| Secure LAN pairing + WSS | Built; physically proven on Mac |
+| Phone device pad UI | Built; not yet parity-accepted |
+| Grant / project administration | Required after pair |
+| Phase 3 physical parity acceptance | Matrix ready; full run pending |
 
-## What users usually hit
+## Quick fixes
 
 | Symptom | Fix |
 |---|---|
 | Keys dark after pair | Mac → **Grant Project to Phone…** for the work folder |
 | Not connected | Enable LAN; same Wi‑Fi; Local Network permission; re-pair if needed |
-| Commands greyed | Grant includes `interrupt` / `runAgent` (admin path does); select a lit agent key |
-| No agent “progress text” | By design for v1: LEDs show status only, not chat/diffs |
+| Commands greyed | Grant includes `interrupt` / `runAgent`; select a lit agent key |
+| No agent progress text | By design for v1: status LEDs only |
 
-## Not claimed yet
+## Remaining gates
 
-- Formal Phase 3 physical parity acceptance (3.13).
-- Host-push observation (phone soft-refreshes while empty as mitigation).
+- Run the Phase 3 parity acceptance matrix on a physical iPhone.
+- Host-push observation (phone currently soft-refreshes when empty).
 - Live approvals delivery to the phone.
-- Durable command ledger in live composition (still in-memory in places).
-- Perfect hardware visual polish (pulse, full remapped layout on pad).
+- Finish durable command ledger in live composition.
 
-## Docs policy
+## Docs
 
-Keep only product-relevant living docs (see README). Phase 0–2 status logs are historical evidence, not the product front door.
+Living docs live in `docs/`. Historical phase evidence lives in `docs/archive/`. Security references live in `docs/reference/`.
